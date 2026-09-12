@@ -1,4 +1,5 @@
 from math import cos, radians
+from uuid import UUID
 
 from sqlalchemy.orm import Session
 
@@ -45,6 +46,11 @@ def list_issues(db: Session):
 
 
 def get_issue(db: Session, issue_id: str):
+    try:
+        UUID(issue_id)
+    except (ValueError, TypeError, AttributeError):
+        return None
+
     return db.query(Issue).filter(Issue.id == issue_id).first()
 
 

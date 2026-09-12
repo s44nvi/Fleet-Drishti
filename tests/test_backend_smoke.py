@@ -84,3 +84,44 @@ def test_analytics():
 
     assert response.status_code == 200
     assert isinstance(response.json(), dict)
+
+
+def test_issue_status_update():
+    token = get_token()
+
+    response = requests.get(
+        f"{API_URL}/issues",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+
+    issues = response.json()
+    assert len(issues) > 0
+
+    issue_id = issues[0]["id"]
+
+    response = requests.patch(
+        f"{API_URL}/issues/{issue_id}/status",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"status": "in_progress"},
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["id"] == issue_id
+    assert data["status"] == "in_progress"
+
+
+def test_issue_status_update_nonexistent_issue():
+    token = get_token()
+
+    response = requests.patch(
+        f"{API_URL}/issues/does-not-exist/status",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"status": "resolved"},
+    )
+
+    assert response.status_code == 404
