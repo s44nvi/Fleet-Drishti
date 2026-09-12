@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from app.database import SessionLocal
 from app.models.core import (
@@ -32,6 +32,10 @@ DEMO_BUSES = [
 ]
 
 
+# -------------------------------------------------------------------
+# Fleet helpers
+# -------------------------------------------------------------------
+
 def get_or_create_route(db, route_code, name):
     route = (
         db.query(Route)
@@ -64,6 +68,7 @@ def get_or_create_bus(db, bus_code, route):
         )
         db.add(bus)
         db.flush()
+
     elif bus.route_id != route.id:
         bus.route_id = route.id
         db.flush()
@@ -85,12 +90,17 @@ def get_or_create_camera(db, camera_code, bus):
         )
         db.add(camera)
         db.flush()
+
     elif camera.bus_id != bus.id:
         camera.bus_id = bus.id
         db.flush()
 
     return camera
 
+
+# -------------------------------------------------------------------
+# Event helpers
+# -------------------------------------------------------------------
 
 def create_demo_event(
     db,
@@ -119,10 +129,15 @@ def create_demo_event(
     db.add(event)
     db.flush()
 
+    # Let the normal M4 fusion logic process the event.
     process_event_for_issue(db, event)
 
     return event
 
+
+# -------------------------------------------------------------------
+# Citizen report helper
+# -------------------------------------------------------------------
 
 def create_demo_citizen_report(
     db,
@@ -148,6 +163,10 @@ def create_demo_citizen_report(
 
     return report
 
+
+# -------------------------------------------------------------------
+# Main seed function
+# -------------------------------------------------------------------
 
 def seed_demo_data():
     db = SessionLocal()
@@ -189,27 +208,36 @@ def seed_demo_data():
         bus_014 = fleet["BUS-014"]
         bus_027 = fleet["BUS-027"]
 
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+
         # -----------------------------------------------------------
-        # Check whether our demo events already exist.
+        # ROAD DEFECT DEMO DATA
+        # -----------------------------------------------------------
+        #
+        # We only create these if road-defect demo events do not
+        # already exist.
+        #
+        # This prevents duplicates when the seed is run repeatedly.
         # -----------------------------------------------------------
 
-        existing_demo_events = (
+        has_road_defect_events = (
             db.query(Event)
-            .filter(Event.subtype.in_([
-                "pothole",
-                "road_damage",
-                "waterlogging",
-                "traffic_congestion",
-            ]))
+            .filter(
+                Event.type == "road_defect",
+                Event.subtype.in_([
+                    "pothole",
+                    "road_damage",
+                    "waterlogging",
+                ]),
+            )
             .count()
+            > 0
         )
 
-        if existing_demo_events == 0:
-
-            now = datetime.utcnow()
+        if not has_road_defect_events:
 
             # -------------------------------------------------------
-            # Road defect observed by BUS-014
+            # Pothole observed by BUS-014
             # -------------------------------------------------------
 
             create_demo_event(
@@ -227,7 +255,8 @@ def seed_demo_data():
 
             # -------------------------------------------------------
             # Same pothole observed by BUS-027
-            # This should fuse into the same persistent Issue.
+            #
+            # This should be fused into the same persistent Issue.
             # -------------------------------------------------------
 
             create_demo_event(
@@ -277,9 +306,38 @@ def seed_demo_data():
                 72.8700,
             )
 
+            db.commit()
+
+            print("Road-defect demo data added.")
+
+        else:
+            print("Road-defect demo data already exists. Skipping.")
+
+        # -----------------------------------------------------------
+        # TRAFFIC DEMO DATA
+        # -----------------------------------------------------------
+        #
+        # IMPORTANT:
+        # Traffic has its own check.
+        #
+        # This means existing pothole data will NOT prevent traffic
+        # demo events from being created.
+        # -----------------------------------------------------------
+
+        has_traffic_events = (
+            db.query(Event)
+            .filter(
+                Event.type == "traffic",
+                Event.subtype == "traffic_congestion",
+            )
+            .count()
+            > 0
+        )
+
+        if not has_traffic_events:
+
             # -------------------------------------------------------
-            # Traffic events
-            # These make /analytics/congestion useful.
+            # Traffic congestion observed by BUS-014
             # -------------------------------------------------------
 
             create_demo_event(
@@ -294,6 +352,10 @@ def seed_demo_data():
                 19.0790,
                 72.8810,
             )
+
+            # -------------------------------------------------------
+            # Traffic congestion observed by BUS-027
+            # -------------------------------------------------------
 
             create_demo_event(
                 db,
@@ -310,14 +372,18 @@ def seed_demo_data():
 
             db.commit()
 
+            print("Traffic demo data added.")
+
+        else:
+            print("Traffic demo data already exists. Skipping.")
+
         # -----------------------------------------------------------
-        # Citizen reports
+        # CITIZEN REPORTS
         # -----------------------------------------------------------
 
         existing_reports = db.query(CitizenReport).count()
 
         if existing_reports == 0:
-            now = datetime.utcnow()
 
             create_demo_citizen_report(
                 db,
@@ -339,7 +405,16 @@ def seed_demo_data():
 
             db.commit()
 
-        print("Demo data seeded successfully.")
+            print("Citizen-report demo data added.")
+
+        else:
+            print("Citizen-report demo data already exists. Skipping.")
+
+        # -----------------------------------------------------------
+        # Summary
+        # -----------------------------------------------------------
+
+        print("\nDemo data seeded successfully.")
 
         print("\nFleet:")
         for item in DEMO_BUSES:
