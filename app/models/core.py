@@ -222,3 +222,19 @@ class CitizenReport(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     matched_issue = relationship("Issue")
+
+
+class Authority(Base):
+    """
+    Authority user responsible for managing CityLens issues.
+    """
+    __tablename__ = "authorities"
+
+    id = Column(UUID(as_uuid=False), primary_key=True, default=gen_uuid)
+
+    name = Column(String, nullable=False)
+    email = Column(String, unique=True, nullable=False)
+    password_hash = Column(String, nullable=False)
+    role = Column(String, nullable=False, default="authority")
+
+    created_at = Column(DateTime, default=datetime.utcnow)

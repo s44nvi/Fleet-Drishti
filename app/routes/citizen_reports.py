@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.dependencies.auth import get_current_authority
 from app.schemas.core import CitizenReportCreate, CitizenReportOut
 from app.services import citizen_report_service
 
@@ -23,5 +24,6 @@ def create_citizen_report(
 @router.get("", response_model=list[CitizenReportOut])
 def get_citizen_reports(
     db: Session = Depends(get_db),
+    current_authority: dict = Depends(get_current_authority),
 ):
     return citizen_report_service.list_citizen_reports(db)
