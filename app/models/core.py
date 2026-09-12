@@ -24,7 +24,11 @@ class Bus(Base):
 
     id = Column(UUID(as_uuid=False), primary_key=True, default=gen_uuid)
     bus_code = Column(String, unique=True, nullable=False)
-    route_id = Column(UUID(as_uuid=False), ForeignKey("routes.id"), nullable=True)
+    route_id = Column(
+        UUID(as_uuid=False),
+        ForeignKey("routes.id"),
+        nullable=True
+    )
     created_at = Column(DateTime, default=datetime.utcnow)
 
     route = relationship("Route", back_populates="buses")
@@ -51,7 +55,11 @@ class Camera(Base):
 
     id = Column(UUID(as_uuid=False), primary_key=True, default=gen_uuid)
     camera_code = Column(String, unique=True, nullable=False)
-    bus_id = Column(UUID(as_uuid=False), ForeignKey("buses.id"), nullable=True)
+    bus_id = Column(
+        UUID(as_uuid=False),
+        ForeignKey("buses.id"),
+        nullable=True
+    )
     created_at = Column(DateTime, default=datetime.utcnow)
 
     bus = relationship("Bus", back_populates="cameras")
@@ -77,9 +85,21 @@ class Event(Base):
     lng = Column(Float, nullable=False)
     timestamp = Column(DateTime, nullable=False)
 
-    bus_id = Column(UUID(as_uuid=False), ForeignKey("buses.id"), nullable=False)
-    route_id = Column(UUID(as_uuid=False), ForeignKey("routes.id"), nullable=True)
-    camera_id = Column(UUID(as_uuid=False), ForeignKey("cameras.id"), nullable=True)
+    bus_id = Column(
+        UUID(as_uuid=False),
+        ForeignKey("buses.id"),
+        nullable=False
+    )
+    route_id = Column(
+        UUID(as_uuid=False),
+        ForeignKey("routes.id"),
+        nullable=True
+    )
+    camera_id = Column(
+        UUID(as_uuid=False),
+        ForeignKey("cameras.id"),
+        nullable=True
+    )
 
     # Links repeated observations to a persistent Issue.
     issue_id = Column(
@@ -172,3 +192,33 @@ class Evidence(Base):
     event = relationship("Event", back_populates="evidence")
     bus = relationship("Bus")
     route = relationship("Route")
+
+
+class CitizenReport(Base):
+    """
+    Citizen-submitted report of a road issue.
+    """
+    __tablename__ = "citizen_reports"
+
+    id = Column(UUID(as_uuid=False), primary_key=True, default=gen_uuid)
+
+    description = Column(String, nullable=True)
+    photo_path = Column(String, nullable=True)
+    video_path = Column(String, nullable=True)
+
+    timestamp = Column(DateTime, nullable=False)
+
+    lat = Column(Float, nullable=False)
+    lng = Column(Float, nullable=False)
+
+    status = Column(String, nullable=False, default="submitted")
+
+    matched_issue_id = Column(
+        UUID(as_uuid=False),
+        ForeignKey("issues.id"),
+        nullable=True
+    )
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    matched_issue = relationship("Issue")

@@ -10,6 +10,36 @@ from app.models.core import Issue, Event
 MATCH_DISTANCE_METERS = 50
 
 
+def calculate_priority(
+    issue: Issue,
+    confidence: float,
+    repeat_observation: bool = False,
+):
+    """
+    Calculate platform priority separately from AI confidence.
+
+    Returns a score from 0 to 100.
+    """
+
+    severity_scores = {
+        "pothole": 70,
+        "road_damage": 80,
+        "waterlogging": 85,
+        "damaged_divider": 75,
+        "missing_zebra_crossing": 80,
+        "damaged_traffic_sign": 65,
+        "other_hazard": 60,
+    }
+
+    base_score = severity_scores.get(issue.subtype, 50)
+    confidence_score = confidence * 20
+    repeat_bonus = 10 if repeat_observation else 0
+
+    priority = base_score + confidence_score + repeat_bonus
+
+    return min(round(priority, 2), 100)
+
+
 def list_issues(db: Session):
     return db.query(Issue).order_by(Issue.last_seen.desc()).all()
 
@@ -97,6 +127,12 @@ def create_issue_from_event(db: Session, event: Event):
     db.add(issue)
     db.flush()
 
+    issue.priority = calculate_priority(
+        issue,
+        event.confidence,
+        repeat_observation=False,
+    )
+
     event.issue_id = issue.id
 
     db.commit()
@@ -112,6 +148,7 @@ def process_event_for_issue(db: Session, event: Event):
     If a matching Issue already exists:
     - attach the Event to it
     - update last_seen
+    - increase priority for repeated observation
 
     Otherwise:
     - create a new Issue
@@ -126,6 +163,12 @@ def process_event_for_issue(db: Session, event: Event):
 
         if event.timestamp > existing_issue.last_seen:
             existing_issue.last_seen = event.timestamp
+
+        existing_issue.priority = calculate_priority(
+            existing_issue,
+            event.confidence,
+            repeat_observation=True,
+        )
 
         db.commit()
         db.refresh(existing_issue)

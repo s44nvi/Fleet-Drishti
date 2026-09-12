@@ -120,3 +120,28 @@ class EvidenceOut(BaseModel):
     route_id: Optional[str] = None
     confidence: float
     created_at: datetime
+
+
+# ---------- Citizen Reports ----------
+
+class CitizenReportCreate(BaseModel):
+    description: Optional[str] = None
+    photo_path: Optional[str] = None
+    video_path: Optional[str] = None
+    timestamp: datetime
+    gps: GPS
+
+
+class CitizenReportOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    description: Optional[str] = None
+    photo_path: Optional[str] = None
+    video_path: Optional[str] = None
+    timestamp: datetime
+    lat: float
+    lng: float
+    status: str
+    matched_issue_id: Optional[str] = None
+    created_at: datetime
