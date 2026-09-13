@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+edge_queue.db
+evidence/
+*.mp4
+.DS_Store
