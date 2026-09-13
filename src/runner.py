@@ -8,18 +8,21 @@ from backend_client import send_event, send_evidence
 from dedup import Deduplicator
 from evidence import save_detection_frame
 
+
 VIDEO_PATH = "sample.mp4"
 
 
 def main():
     detector = MockDetector()
     gps_provider = SimulatedGPS()
+
     deduplicator = Deduplicator(
         max_distance=100.0,
         max_gap_seconds=1.0,
     )
 
     events_sent = 0
+    events_queued = 0
     evidence_sent = 0
     detections_seen = 0
 
@@ -73,11 +76,26 @@ def main():
 
             # Send event to backend
             response = send_event(event)
+
+            # Backend unavailable -> event is queued locally
+            if response.get("queued"):
+                events_queued += 1
+
+                print(
+                    f"Frame {frame_number} | "
+                    f"Queued: {detection.class_name} "
+                    f"(confidence={detection.confidence:.2f}) "
+                    f"evidence={evidence_path}"
+                )
+
+                continue
+
+            # Backend accepted event
             events_sent += 1
 
             event_id = response["id"]
 
-            # Send evidence to backend
+            # Send evidence only after event exists
             evidence_response = send_evidence(
                 event_id=event_id,
                 frame_path=evidence_path,
@@ -102,6 +120,7 @@ def main():
     print("\nFinished.")
     print(f"Detections seen: {detections_seen}")
     print(f"Events sent: {events_sent}")
+    print(f"Events queued: {events_queued}")
     print(f"Evidence sent: {evidence_sent}")
 
 

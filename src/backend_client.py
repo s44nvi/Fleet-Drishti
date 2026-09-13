@@ -99,13 +99,22 @@ def flush_queue():
     if not queued:
         return
 
-    print(
-        f"Retrying {len(queued)} queued event(s)..."
-    )
+    print(f"Retrying {len(queued)} queued event(s)...")
 
     for item in queued:
         try:
-            send_event(item["event"])
+            token = get_token()
+
+            response = requests.post(
+                f"{BACKEND_URL}/events",
+                json=item["event"],
+                headers={
+                    "Authorization": f"Bearer {token}",
+                },
+                timeout=10,
+            )
+
+            response.raise_for_status()
 
             remove_event(item["id"])
 

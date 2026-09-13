@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from typing import Optional
 
 from detectors.base import Detection
 
@@ -33,6 +32,7 @@ class Deduplicator:
     @staticmethod
     def _center(detection: Detection):
         x1, y1, x2, y2 = detection.bbox
+
         return (
             (x1 + x2) / 2,
             (y1 + y2) / 2,
@@ -53,7 +53,10 @@ class Deduplicator:
         old_x, old_y = self._center(existing.detection)
         new_x, new_y = self._center(detection)
 
-        distance = ((new_x - old_x) ** 2 + (new_y - old_y) ** 2) ** 0.5
+        distance = (
+            (new_x - old_x) ** 2
+            + (new_y - old_y) ** 2
+        ) ** 0.5
 
         return distance <= self.max_distance
 
@@ -62,10 +65,6 @@ class Deduplicator:
         detection: Detection,
         timestamp_seconds: float,
     ) -> bool:
-        """
-        Returns True only when this detection should create a new event.
-        """
-
         for tracked in self.active:
             if self._is_same_detection(
                 tracked,
