@@ -83,6 +83,12 @@ def test_create_and_get_evidence():
     assert evidence["event_id"] == event["id"]
     assert evidence["frame_path"] == "evidence/frames/test-frame.jpg"
     assert evidence["video_path"] == "evidence/videos/test-clip.mp4"
+    assert evidence["timestamp"] == event["timestamp"]
+    assert evidence["lat"] == event["lat"]
+    assert evidence["lng"] == event["lng"]
+    assert evidence["bus_id"] == BUS_ID
+    assert evidence["route_id"] == ROUTE_ID
+    assert evidence["confidence"] == 0.87
 
     evidence_id = evidence["id"]
 
@@ -99,3 +105,57 @@ def test_create_and_get_evidence():
 
     assert fetched_evidence["id"] == evidence_id
     assert fetched_evidence["event_id"] == event["id"]
+
+
+def test_evidence_invalid_event():
+    token = get_token()
+
+    response = requests.post(
+        f"{API_URL}/evidence",
+        json={
+            "event_id": "does-not-exist",
+            "frame_path": "evidence/frames/test-frame.jpg",
+            "video_path": None,
+            "timestamp": datetime.now().replace(microsecond=0).isoformat(),
+            "gps": {
+                "lat": 19.0900,
+                "lng": 72.8900,
+            },
+            "bus_id": BUS_ID,
+            "route_id": ROUTE_ID,
+            "confidence": 0.87,
+        },
+        headers={
+            "Authorization": f"Bearer {token}",
+        },
+    )
+
+    assert response.status_code == 404
+
+
+def test_evidence_invalid_bus():
+    token = get_token()
+
+    event = create_test_event(token)
+
+    response = requests.post(
+        f"{API_URL}/evidence",
+        json={
+            "event_id": event["id"],
+            "frame_path": "evidence/frames/test-frame.jpg",
+            "video_path": None,
+            "timestamp": event["timestamp"],
+            "gps": {
+                "lat": event["lat"],
+                "lng": event["lng"],
+            },
+            "bus_id": "does-not-exist",
+            "route_id": ROUTE_ID,
+            "confidence": 0.87,
+        },
+        headers={
+            "Authorization": f"Bearer {token}",
+        },
+    )
+
+    assert response.status_code == 404
