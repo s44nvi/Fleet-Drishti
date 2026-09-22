@@ -1,5 +1,6 @@
 from math import cos, radians
 from uuid import UUID
+from datetime import timezone
 
 from sqlalchemy.orm import Session
 
@@ -114,6 +115,23 @@ def find_matching_issue(db: Session, event: Event):
     return None
 
 
+def _utc_aware(dt):
+    """
+    Normalize a datetime to timezone-aware UTC.
+
+    Handles both:
+    - timezone-aware datetimes
+    - timezone-naive datetimes from PostgreSQL
+    """
+    if dt is None:
+        return None
+
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+
+    return dt.astimezone(timezone.utc)
+
+
 def create_issue_from_event(db: Session, event: Event):
     """
     Create a new persistent Issue from an Event.
@@ -153,7 +171,9 @@ def process_event_for_issue(db: Session, event: Event):
 
     If a matching Issue already exists:
     - attach the Event to it
-    - update last_seen
+    - update first_seen/last_seen (normalizing naive/aware datetimes
+      before comparing, since PostgreSQL can hand back naive
+      datetimes while incoming event timestamps may be aware)
     - increase priority for repeated observation
 
     Otherwise:
@@ -164,11 +184,15 @@ def process_event_for_issue(db: Session, event: Event):
     if existing_issue:
         event.issue_id = existing_issue.id
 
-        if event.timestamp < existing_issue.first_seen:
-            existing_issue.first_seen = event.timestamp
+        event_timestamp = _utc_aware(event.timestamp)
+        first_seen = _utc_aware(existing_issue.first_seen)
+        last_seen = _utc_aware(existing_issue.last_seen)
 
-        if event.timestamp > existing_issue.last_seen:
-            existing_issue.last_seen = event.timestamp
+        if event_timestamp < first_seen:
+            existing_issue.first_seen = event_timestamp
+
+        if event_timestamp > last_seen:
+            existing_issue.last_seen = event_timestamp
 
         existing_issue.priority = calculate_priority(
             existing_issue,
