@@ -22,6 +22,18 @@ NEW_OBSERVER_WEIGHT = 1.0    # new bus/route seeing the issue for the first time
 SAME_BUS_REPEAT_WEIGHT = 0.3  # same bus re-observing within the window
 CITIZEN_REPORT_WEIGHT = 0.5   # citizen report confirming an issue
 
+# Citizen reports don't self-report a confidence score (unlike Events),
+# so this fixed, moderate-trust value is used as the incoming
+# confidence fed into fuse_confidence() for a matched citizen report.
+CITIZEN_REPORT_BASE_CONFIDENCE = 0.6
+
+# Placeholder for traffic/foot-exposure signal used by calculate_priority.
+# There is no real traffic-exposure data source yet (no dedicated
+# traffic-volume field on Bus/Route/Issue), so this is a neutral 0-1
+# default meaning "average exposure". Revisit once real traffic event
+# data exists and a proper signal can be computed per issue/route.
+TRAFFIC_EXPOSURE_PLACEHOLDER = 0.5
+
 # Severity base scores (0-100), used both to seed Issue.severity and as
 # the base term of calculate_priority.
 SEVERITY_SCORES = {
@@ -70,7 +82,7 @@ def calculate_priority(
     confidence: float,
     repeat_observation: bool = False,
     observation_count: int = 1,
-    traffic_exposure: float = 0.5,
+    traffic_exposure: float = TRAFFIC_EXPOSURE_PLACEHOLDER,
 ):
     """
     Calculate platform priority separately from AI confidence.
@@ -87,10 +99,10 @@ def calculate_priority(
       urgency, with diminishing returns.
     - traffic_exposure: how much traffic/foot exposure this issue has.
       There is no dedicated traffic-volume field on Bus/Route/Issue
-      yet, so this is a 0-1 parameter with a neutral default of 0.5
-      (i.e. "average exposure") until a real traffic model exists.
-      Callers with a better signal (e.g. route ridership) can pass it
-      explicitly.
+      yet, so this defaults to TRAFFIC_EXPOSURE_PLACEHOLDER (a neutral
+      "average exposure" placeholder) until a real traffic model
+      exists. Callers with a better signal (e.g. route ridership) can
+      pass it explicitly.
     - age: how long the issue has been open and unresolved. Older
       unresolved issues get a small escalating bonus, capped so this
       alone can't dominate the score.

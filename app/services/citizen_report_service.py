@@ -7,15 +7,16 @@ from app.services.issue_service import (
     fuse_confidence,
     calculate_priority,
     CITIZEN_REPORT_WEIGHT,
+    CITIZEN_REPORT_BASE_CONFIDENCE,
 )
 
 # Citizen reports don't carry a type/subtype/confidence like Events do
 # (see CitizenReportCreate) - they're free-form. To reuse the same
 # spatial matching used for events, we treat a citizen report as a
 # plausible match for any open issue type/subtype within range, and
-# fall back to a fixed moderate confidence for the fusion contribution
-# since citizens don't self-report a confidence score.
-CITIZEN_REPORT_BASE_CONFIDENCE = 0.6
+# fall back to CITIZEN_REPORT_BASE_CONFIDENCE (defined alongside the
+# other observation weights in issue_service) for the fusion
+# contribution, since citizens don't self-report a confidence score.
 
 
 def _find_matching_issue_for_report(db: Session, report: CitizenReport):
