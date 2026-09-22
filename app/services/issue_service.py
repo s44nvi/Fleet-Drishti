@@ -1,6 +1,6 @@
 from math import cos, radians
 from uuid import UUID
-from datetime import timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
@@ -11,33 +11,117 @@ from app.models.core import Issue, Event
 # 50 meters is suitable for the prototype.
 MATCH_DISTANCE_METERS = 50
 
+# Window within which a re-observation from the SAME bus is considered
+# a low-information repeat (e.g. the bus idling / passing twice on the
+# same run) rather than an independent confirmation.
+SAME_BUS_REPEAT_WINDOW = timedelta(hours=24)
+
+# --- Noisy-OR observation weights -------------------------------------
+# c_n = incoming_observation_confidence * observation_weight
+NEW_OBSERVER_WEIGHT = 1.0    # new bus/route seeing the issue for the first time
+SAME_BUS_REPEAT_WEIGHT = 0.3  # same bus re-observing within the window
+CITIZEN_REPORT_WEIGHT = 0.5   # citizen report confirming an issue
+
+# Severity base scores (0-100), used both to seed Issue.severity and as
+# the base term of calculate_priority.
+SEVERITY_SCORES = {
+    "pothole": 70,
+    "road_damage": 80,
+    "waterlogging": 85,
+    "damaged_divider": 75,
+    "missing_zebra_crossing": 80,
+    "damaged_traffic_sign": 65,
+    "other_hazard": 60,
+}
+
+# Confidence fusion cap. Without a cap, sequential noisy-OR fusion
+# asymptotically approaches 1.0 as more observations arrive, which is
+# unrealistic (sensor/report noise means we should never claim near
+# perfect certainty). We apply a simple, well-documented ceiling: the
+# fused confidence is clamped to this value. This is the simplest
+# defensible approach that doesn't require reworking the observation
+# history/decay bookkeeping the current model doesn't track.
+CONFIDENCE_CAP = 0.97
+
+
+def fuse_confidence(previous_confidence: float, incoming_confidence: float, observation_weight: float) -> float:
+    """
+    Sequential noisy-OR fusion.
+
+    C_n = 1 - (1 - C_(n-1)) * (1 - c_n)
+    where c_n = incoming_observation_confidence * observation_weight
+
+    `previous_confidence` and the result are both clamped to
+    CONFIDENCE_CAP so repeated observations cannot drive the fused
+    confidence arbitrarily close to 1.0 (see CONFIDENCE_CAP comment).
+    """
+    previous_confidence = max(0.0, min(previous_confidence, CONFIDENCE_CAP))
+
+    c_n = max(0.0, min(incoming_confidence, 1.0)) * observation_weight
+    c_n = max(0.0, min(c_n, 1.0))
+
+    fused = 1 - (1 - previous_confidence) * (1 - c_n)
+
+    return round(min(fused, CONFIDENCE_CAP), 4)
+
 
 def calculate_priority(
     issue: Issue,
     confidence: float,
     repeat_observation: bool = False,
+    observation_count: int = 1,
+    traffic_exposure: float = 0.5,
 ):
     """
     Calculate platform priority separately from AI confidence.
 
+    Priority is a 0-100 operational urgency score. It is intentionally
+    NOT the same thing as Issue.confidence (which only measures how
+    sure we are the defect is real). Priority additionally factors in:
+
+    - severity: how dangerous/disruptive this class of defect is
+      (SEVERITY_SCORES, keyed by subtype).
+    - confidence: how sure we are the issue is real (scaled down so it
+      contributes but doesn't dominate).
+    - repeat/observation count: more independent confirmations raise
+      urgency, with diminishing returns.
+    - traffic_exposure: how much traffic/foot exposure this issue has.
+      There is no dedicated traffic-volume field on Bus/Route/Issue
+      yet, so this is a 0-1 parameter with a neutral default of 0.5
+      (i.e. "average exposure") until a real traffic model exists.
+      Callers with a better signal (e.g. route ridership) can pass it
+      explicitly.
+    - age: how long the issue has been open and unresolved. Older
+      unresolved issues get a small escalating bonus, capped so this
+      alone can't dominate the score.
+
     Returns a score from 0 to 100.
     """
+    base_score = SEVERITY_SCORES.get(issue.subtype, 50)
 
-    severity_scores = {
-        "pothole": 70,
-        "road_damage": 80,
-        "waterlogging": 85,
-        "damaged_divider": 75,
-        "missing_zebra_crossing": 80,
-        "damaged_traffic_sign": 65,
-        "other_hazard": 60,
-    }
+    confidence_score = max(0.0, min(confidence, 1.0)) * 15
 
-    base_score = severity_scores.get(issue.subtype, 50)
-    confidence_score = confidence * 20
-    repeat_bonus = 10 if repeat_observation else 0
+    # Diminishing-returns bonus for repeated/independent confirmations.
+    repeat_bonus = 0
+    if repeat_observation:
+        repeat_bonus = min(2 + 3 * max(observation_count - 1, 0), 12)
 
-    priority = base_score + confidence_score + repeat_bonus
+    traffic_bonus = max(0.0, min(traffic_exposure, 1.0)) * 8
+
+    age_bonus = 0
+    first_seen = _utc_aware(issue.first_seen)
+    if first_seen is not None:
+        age_days = (datetime.now(timezone.utc) - first_seen).total_seconds() / 86400
+        # +1 point per day unresolved, capped at 10.
+        age_bonus = min(max(age_days, 0) * 1.0, 10)
+
+    priority = (
+        base_score
+        + confidence_score
+        + repeat_bonus
+        + traffic_bonus
+        + age_bonus
+    )
 
     return min(round(priority, 2), 100)
 
@@ -83,7 +167,7 @@ def distance_meters(lat1, lng1, lat2, lng2):
     return (lat_diff ** 2 + lng_diff ** 2) ** 0.5
 
 
-def find_matching_issue(db: Session, event: Event):
+def find_matching_issue(db: Session, lat: float, lng: float, type_: str, subtype: str):
     """
     Find an existing Issue representing the same physical defect.
 
@@ -95,8 +179,8 @@ def find_matching_issue(db: Session, event: Event):
     issues = (
         db.query(Issue)
         .filter(
-            Issue.type == event.type,
-            Issue.subtype == event.subtype,
+            Issue.type == type_,
+            Issue.subtype == subtype,
         )
         .all()
     )
@@ -105,14 +189,19 @@ def find_matching_issue(db: Session, event: Event):
         distance = distance_meters(
             issue.lat,
             issue.lng,
-            event.lat,
-            event.lng,
+            lat,
+            lng,
         )
 
         if distance <= MATCH_DISTANCE_METERS:
             return issue
 
     return None
+
+
+def find_matching_issue_for_event(db: Session, event: Event):
+    """Backwards-compatible wrapper matching an Event to an Issue."""
+    return find_matching_issue(db, event.lat, event.lng, event.type, event.subtype)
 
 
 def _utc_aware(dt):
@@ -132,6 +221,35 @@ def _utc_aware(dt):
     return dt.astimezone(timezone.utc)
 
 
+def _same_bus_recent_observation(db: Session, issue: Issue, event: Event) -> bool:
+    """
+    True if this event's bus already has a prior Event linked to this
+    issue within SAME_BUS_REPEAT_WINDOW (i.e. this is a low-information
+    repeat rather than an independent confirmation).
+    """
+    window_start = _utc_aware(event.timestamp) - SAME_BUS_REPEAT_WINDOW
+    window_end = _utc_aware(event.timestamp) + SAME_BUS_REPEAT_WINDOW
+
+    prior = (
+        db.query(Event)
+        .filter(
+            Event.issue_id == issue.id,
+            Event.bus_id == event.bus_id,
+            Event.id != event.id,
+        )
+        .all()
+    )
+
+    for other in prior:
+        other_ts = _utc_aware(other.timestamp)
+        if other_ts is None:
+            continue
+        if window_start <= other_ts <= window_end:
+            return True
+
+    return False
+
+
 def create_issue_from_event(db: Session, event: Event):
     """
     Create a new persistent Issue from an Event.
@@ -143,6 +261,7 @@ def create_issue_from_event(db: Session, event: Event):
         lng=event.lng,
         severity=None,
         priority=None,
+        confidence=0.0,
         status="unresolved",
         first_seen=event.timestamp,
         last_seen=event.timestamp,
@@ -151,10 +270,16 @@ def create_issue_from_event(db: Session, event: Event):
     db.add(issue)
     db.flush()
 
+    # First observation: fuse from a prior confidence of 0.0 with the
+    # "new observer" weight of 1.0.
+    issue.confidence = fuse_confidence(0.0, event.confidence, NEW_OBSERVER_WEIGHT)
+    issue.severity = str(SEVERITY_SCORES.get(issue.subtype, 50))
+
     issue.priority = calculate_priority(
         issue,
-        event.confidence,
+        issue.confidence,
         repeat_observation=False,
+        observation_count=1,
     )
 
     event.issue_id = issue.id
@@ -171,17 +296,23 @@ def process_event_for_issue(db: Session, event: Event):
 
     If a matching Issue already exists:
     - attach the Event to it
-    - update first_seen/last_seen (normalizing naive/aware datetimes
-      before comparing, since PostgreSQL can hand back naive
-      datetimes while incoming event timestamps may be aware)
-    - increase priority for repeated observation
+    - update first_seen/last_seen
+    - fuse the event's confidence into Issue.confidence via
+      sequential noisy-OR, weighted by whether this is a new
+      observer (bus/route) or a same-bus repeat within 24h
+    - recalculate priority (kept separate from confidence)
 
     Otherwise:
     - create a new Issue
     """
-    existing_issue = find_matching_issue(db, event)
+    existing_issue = find_matching_issue_for_event(db, event)
 
     if existing_issue:
+        # Determine observation weight BEFORE attaching the event,
+        # so the "same bus" lookup doesn't see this event itself.
+        is_same_bus_repeat = _same_bus_recent_observation(db, existing_issue, event)
+        weight = SAME_BUS_REPEAT_WEIGHT if is_same_bus_repeat else NEW_OBSERVER_WEIGHT
+
         event.issue_id = existing_issue.id
 
         event_timestamp = _utc_aware(event.timestamp)
@@ -194,10 +325,21 @@ def process_event_for_issue(db: Session, event: Event):
         if event_timestamp > last_seen:
             existing_issue.last_seen = event_timestamp
 
+        existing_issue.confidence = fuse_confidence(
+            existing_issue.confidence or 0.0,
+            event.confidence,
+            weight,
+        )
+
+        observation_count = (
+            db.query(Event).filter(Event.issue_id == existing_issue.id).count()
+        )
+
         existing_issue.priority = calculate_priority(
             existing_issue,
-            event.confidence,
+            existing_issue.confidence,
             repeat_observation=True,
+            observation_count=observation_count,
         )
 
         db.commit()
