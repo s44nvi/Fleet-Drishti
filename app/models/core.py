@@ -137,6 +137,11 @@ class Issue(Base):
     severity = Column(String, nullable=True)
     priority = Column(Float, nullable=True)
 
+    # Running fused confidence (noisy-OR) that this issue is a real,
+    # persistent defect, distinct from `priority` (which factors in
+    # severity/age/traffic as well). 0.0 = no confidence yet.
+    confidence = Column(Float, nullable=False, default=0.0)
+
     status = Column(String, nullable=False, default="unresolved")
 
     first_seen = Column(DateTime, nullable=False)
