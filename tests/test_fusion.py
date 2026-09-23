@@ -2,7 +2,7 @@ import random
 import requests
 from datetime import datetime, timedelta
 
-from app.services.issue_service import fuse_confidence, calculate_priority
+from app.services.issue_service import fuse_confidence, calculate_priority, severity_label
 from app.models.core import Issue
 
 API_URL = "http://127.0.0.1:8000"
@@ -117,6 +117,13 @@ def test_noisy_or_cap_prevents_reaching_one():
 
     assert confidence < 1.0
     assert confidence <= 0.97  # CONFIDENCE_CAP
+
+
+def test_severity_label_buckets_score():
+    # Thresholds: >=75 "high", >=60 "medium", else "low".
+    assert severity_label(85) == "high"   # waterlogging
+    assert severity_label(70) == "medium"  # pothole
+    assert severity_label(50) == "low"
 
 
 def test_priority_distinct_from_confidence():

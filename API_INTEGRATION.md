@@ -150,11 +150,16 @@ lat
 lng
 severity
 priority
+confidence
 status
 first_seen
 last_seen
 created_at
 ```
+
+`severity` is a bucketed label: `"high"`, `"medium"`, or `"low"` (derived from the defect subtype).
+
+`confidence` is a fused 0.0-1.0 score reflecting how sure the platform is that this issue is a real, persistent defect (distinct from `priority`, which is a separate operational urgency score).
 
 ### Update Issue Status
 

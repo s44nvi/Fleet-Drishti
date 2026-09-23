@@ -55,6 +55,22 @@ SEVERITY_SCORES = {
 # history/decay bookkeeping the current model doesn't track.
 CONFIDENCE_CAP = 0.97
 
+# Severity label thresholds applied to a SEVERITY_SCORES value (0-100)
+# when writing Issue.severity. SEVERITY_SCORES itself remains the
+# numeric map used by calculate_priority; only the value written to
+# Issue.severity is bucketed into a label.
+SEVERITY_HIGH_THRESHOLD = 75
+SEVERITY_MEDIUM_THRESHOLD = 60
+
+
+def severity_label(score: int) -> str:
+    """Bucket a SEVERITY_SCORES value into "high"/"medium"/"low"."""
+    if score >= SEVERITY_HIGH_THRESHOLD:
+        return "high"
+    if score >= SEVERITY_MEDIUM_THRESHOLD:
+        return "medium"
+    return "low"
+
 
 def fuse_confidence(previous_confidence: float, incoming_confidence: float, observation_weight: float) -> float:
     """
@@ -285,7 +301,7 @@ def create_issue_from_event(db: Session, event: Event):
     # First observation: fuse from a prior confidence of 0.0 with the
     # "new observer" weight of 1.0.
     issue.confidence = fuse_confidence(0.0, event.confidence, NEW_OBSERVER_WEIGHT)
-    issue.severity = str(SEVERITY_SCORES.get(issue.subtype, 50))
+    issue.severity = severity_label(SEVERITY_SCORES.get(issue.subtype, 50))
 
     issue.priority = calculate_priority(
         issue,

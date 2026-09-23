@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.config import settings
 from app.routes import (
     events,
     fleet,
@@ -14,13 +15,13 @@ from app.routes import (
 app = FastAPI(title="CityLens Backend (M4)")
 
 # Allow the frontend to communicate with the backend
-# during local development.
+# during local development. Configurable via CORS_ORIGINS env var
+# (comma-separated); defaults cover common local dev ports.
+cors_origins = [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:5173",
-    ],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
