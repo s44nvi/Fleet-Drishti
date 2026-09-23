@@ -1,10 +1,16 @@
 import type { StyleSpecification } from "maplibre-gl";
 
-// Single source of truth for the basemap: swap the tile source/style here to
-// change provider without touching GISMap.tsx. Token-free OpenStreetMap
-// raster tiles — fine for this prototype's traffic, but per OSM's tile usage
-// policy a real deployment should move to a provider meant for production
-// load (e.g. MapTiler, or a self-hosted tile server).
+// Single source of truth for the basemap: swap the style here to change
+// provider without touching GISMap.tsx.
+//
+// Primary: OpenFreeMap "Positron" — a token-free, muted light vector style
+// (OpenStreetMap data), so Fleet Drishti's own intelligence layers are the
+// only colour on the map (MASTER.md §10).
+export const LIGHT_VECTOR_STYLE_URL = "https://tiles.openfreemap.org/styles/positron";
+
+// Fallback if the vector style can't be fetched: token-free OpenStreetMap
+// raster tiles. Per OSM's tile usage policy a production deployment should
+// move to a provider meant for production load (or a self-hosted server).
 export const OSM_RASTER_STYLE: StyleSpecification = {
   version: 8,
   sources: {

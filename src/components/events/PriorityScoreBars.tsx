@@ -1,31 +1,25 @@
 import type { PriorityBreakdown } from "../../lib/priorityScore";
 
-interface PriorityScoreBarsProps {
-  breakdown: PriorityBreakdown;
-}
-
-// Compact visualization of the factors behind a priority score — the
-// product's AHP-style prioritization made legible without exposing the
-// underlying math. See lib/priorityScore.ts: this is a deterministic demo
-// scoring model, not a live backend calculation.
-export function PriorityScoreBars({ breakdown }: PriorityScoreBarsProps) {
+// Explainable priority: one score, five factor bars. The weighting is a
+// UI-layer demo model (lib/priorityScore.ts), so callers badge it DEMO.
+export function PriorityScoreBars({ breakdown }: { breakdown: PriorityBreakdown }) {
   return (
-    <div className="flex flex-col gap-space-xs pt-space-xs">
-      <div className="flex items-center justify-between">
-        <span className="font-label-eyebrow text-label-eyebrow text-ink-muted uppercase tracking-widest">Priority Score</span>
-        <span className="font-title-sm text-title-sm text-ink-primary font-bold">{breakdown.score}</span>
+    <div className="flex flex-col gap-3">
+      <div className="flex items-baseline gap-1.5">
+        <span className="text-kpi text-ink tabular-nums">{breakdown.score}</span>
+        <span className="text-meta text-ink-3">/ 100</span>
       </div>
-      <div className="flex flex-col gap-1">
+      <ul className="flex flex-col gap-2" aria-label="Priority factors">
         {breakdown.factors.map((factor) => (
-          <div key={factor.key} className="flex items-center gap-space-sm">
-            <span className="font-label-code text-label-code text-ink-muted w-[76px] shrink-0">{factor.label}</span>
-            <div className="flex-1 h-1.5 rounded-full bg-surface-panel overflow-hidden">
-              <div className="h-full rounded-full bg-primary-civic-active/70" style={{ width: `${factor.value}%` }} />
-            </div>
-          </div>
+          <li key={factor.key} className="grid grid-cols-[84px_1fr_28px] items-center gap-2">
+            <span className="text-meta text-ink-2">{factor.label}</span>
+            <span className="h-1.5 rounded-full bg-surface-2 overflow-hidden" aria-hidden="true">
+              <span className="block h-full rounded-full bg-action" style={{ width: `${factor.value}%` }} />
+            </span>
+            <span className="text-meta text-ink-2 tabular-nums text-right">{factor.value}</span>
+          </li>
         ))}
-      </div>
-      <span className="font-body-sm text-body-sm text-ink-muted italic">Demo scoring model &middot; illustrates prioritization factors</span>
+      </ul>
     </div>
   );
 }

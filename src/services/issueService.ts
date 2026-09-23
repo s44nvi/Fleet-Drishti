@@ -1,6 +1,7 @@
 import type { InfrastructureIssue, Issue, SafetyEvent, TrafficHotspot } from "../types";
 import { mockInfrastructureIssues, mockIssues, mockSafetyEvents, mockTrafficHotspots } from "../data/mock";
 import { computeTopHotspots, type Hotspot } from "../lib/hotspots";
+import { isInfrastructureAssetInScope } from "../lib/taxonomy";
 import { mockAsync } from "./mockAsync";
 
 // Fused/detected-condition data: Issues (the multi-bus-correlated entities
@@ -44,7 +45,8 @@ export const issueService = {
         issues: mockIssues,
         trafficHotspots: mockTrafficHotspots,
         safetyEvents: mockSafetyEvents,
-        infrastructureIssues: mockInfrastructureIssues,
+        // Only PS-scope infrastructure (see lib/taxonomy.ts).
+        infrastructureIssues: mockInfrastructureIssues.filter((item) => isInfrastructureAssetInScope(item.assetType)),
       }),
     );
   },

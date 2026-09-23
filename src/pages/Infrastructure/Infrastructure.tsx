@@ -1,134 +1,242 @@
-import { useState } from "react";
-import { PageHeader, Panel, PanelHeader, CategoryFilterRow, SeverityBadge } from "../../components/ui";
-import { KpiStrip, DetectionDistributionChart } from "../../components/telemetry";
-import { InfrastructureIssueCard } from "../../components/infrastructure";
+import { useMemo, useState } from "react";
+import { Bus, Construction, Footprints, SeparatorVertical, Signpost, TriangleAlert, Waves, type LucideIcon } from "lucide-react";
+import { IconTile, PageHeader, SeverityBadge, SourceBadge, StatusBadge } from "../../components/ui";
 import { GISMap } from "../../components/gis";
 import { useAsyncData } from "../../hooks/useAsyncData";
-import { issueService } from "../../services";
-import { INFRASTRUCTURE_CATEGORIES, infrastructureCategoryForAssetType, type InfrastructureCategory } from "../../lib/taxonomy";
-import type { MapMarker } from "../../types";
+import { eventService, issueService } from "../../services";
+import { groupEventsIntoIntelligence } from "../../lib/intelligenceGrouping";
+import {
+  INFRASTRUCTURE_CATEGORIES,
+  infrastructureCategoryForAssetType,
+  infrastructureCategoryForSubtype,
+  isRoadDomainType,
+  type InfrastructureCategory,
+} from "../../lib/taxonomy";
+import { ISSUE_STATUS } from "../../lib/status";
+import { categoryVisual, humanize, type Tone } from "../../lib/visuals";
+import { datasetAnchor } from "../../lib/pulse";
+import { formatMinutesAgo, minutesAgo } from "../../lib/timeAgo";
+import { cn } from "../../lib/cn";
+import type { IssueStatus, MapMarker, Severity } from "../../types";
 
-type CategoryFilter = "All" | InfrastructureCategory;
+const CATEGORY_ICON: Record<InfrastructureCategory, LucideIcon> = {
+  "Missing Divider": SeparatorVertical,
+  "Missing/Faded Zebra Crossing": Footprints,
+  "Damaged/Missing Signboard": Signpost,
+  "Road Damage": Construction,
+  Waterlogging: Waves,
+  "Other Road Hazard": TriangleAlert,
+};
 
-// Infrastructure Intelligence: PS §"infrastructure deficiencies" (missing
-// dividers, faded zebra crossings, damaged/missing signboards, road
-// damage). Backed entirely by the InfrastructureIssue fixture domain — a
-// real but separate asset-condition registry (see lib/taxonomy.ts's
-// INFRASTRUCTURE_CATEGORIES doc comment for why it isn't the same
-// population as Road Issues' identically-named categories). Every record
-// here is a single observation: this domain has no confidence/observation-
-// count/observing-buses fields and no path through the Event/Issue
-// corroboration pipeline yet, so "Corroborated" is honestly 0 rather than
-// borrowed from another domain.
+const CATEGORY_TONE: Record<InfrastructureCategory, Tone> = {
+  "Missing Divider": "watch",
+  "Missing/Faded Zebra Crossing": "watch",
+  "Damaged/Missing Signboard": "watch",
+  "Road Damage": "watch",
+  Waterlogging: "action",
+  "Other Road Hazard": "neutral",
+};
+
+// Domain-specific card shape: an asset-condition record and a bus
+// observation group carry different facts, so each keeps its own.
+interface BoardItem {
+  id: string;
+  category: InfrastructureCategory;
+  title: string;
+  location: string;
+  severity: Severity;
+  status?: IssueStatus;
+  observedAt: string;
+  busIds?: string[];
+  source: "asset" | "observation";
+  marker: MapMarker;
+}
+
+// Infrastructure: "What infrastructure needs attention?"
+// A board with exactly the SIH PS infrastructure categories as columns.
+// Records come from PS-scope asset-condition fixtures and from bus road
+// observations in those categories. Out-of-scope asset types (streetlight,
+// drainage, utility pole) are not shown.
 export function Infrastructure() {
-  const { data: items, loading } = useAsyncData(() => issueService.listInfrastructureIssues(), []);
-  const [category, setCategory] = useState<CategoryFilter>("All");
+  const { data: assets } = useAsyncData(() => issueService.listInfrastructureIssues(), []);
+  const { data: issues } = useAsyncData(() => issueService.listIssues(), []);
+  const { data: events } = useAsyncData(() => eventService.listEvents(), []);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const allItems = items ?? [];
+  const anchor = useMemo(
+    () => datasetAnchor([...(events ?? []).map((e) => e.timestamp), ...(assets ?? []).map((a) => a.observedAt)]),
+    [events, assets],
+  );
 
-  // --- KPIs ---
-  const highOrCritical = allItems.filter((item) => item.severity === "critical" || item.severity === "high");
-  const affectedLocations = new Set(allItems.map((item) => item.location)).size;
+  const items = useMemo<BoardItem[]>(() => {
+    const out: BoardItem[] = [];
+    for (const asset of assets ?? []) {
+      const category = infrastructureCategoryForAssetType(asset.assetType);
+      if (!category) continue;
+      const title = `${categoryVisual(asset.assetType).label} ${asset.condition}`;
+      out.push({
+        id: asset.infrastructureIssueId,
+        category,
+        title,
+        location: asset.location,
+        severity: asset.severity,
+        status: asset.status,
+        observedAt: asset.observedAt,
+        source: "asset",
+        marker: {
+          id: asset.infrastructureIssueId,
+          kind: "infrastructure-asset",
+          category: asset.assetType,
+          label: title,
+          detail: asset.location,
+          latitude: asset.latitude,
+          longitude: asset.longitude,
+          intensity: asset.severity,
+        },
+      });
+    }
+    const roadIssues = (issues ?? []).filter((i) => isRoadDomainType(i.type));
+    for (const issue of roadIssues) {
+      const category = infrastructureCategoryForSubtype(issue.subtype);
+      if (!category) continue;
+      out.push({
+        id: issue.issueId,
+        category,
+        title: categoryVisual(issue.subtype).label,
+        location: issue.location,
+        severity: issue.severity,
+        status: issue.status,
+        observedAt: issue.lastSeen,
+        busIds: issue.observingBuses,
+        source: "observation",
+        marker: {
+          id: issue.issueId,
+          kind: "infrastructure-asset",
+          category: issue.subtype,
+          label: categoryVisual(issue.subtype).label,
+          detail: issue.location,
+          latitude: issue.latitude,
+          longitude: issue.longitude,
+          intensity: issue.severity,
+          href: `/road-issues/${issue.issueId}`,
+        },
+      });
+    }
+    const fused = new Set(roadIssues.map((i) => i.issueId));
+    const groups = groupEventsIntoIntelligence((events ?? []).filter((e) => isRoadDomainType(e.eventType)), roadIssues).filter(
+      (g) => !fused.has(g.key),
+    );
+    for (const group of groups) {
+      const category = infrastructureCategoryForSubtype(group.subtype);
+      if (!category) continue;
+      out.push({
+        id: group.key,
+        category,
+        title: categoryVisual(group.subtype).label,
+        location: group.location,
+        severity: group.severity,
+        observedAt: group.lastObserved,
+        busIds: group.busIds,
+        source: "observation",
+        marker: {
+          id: group.key,
+          kind: "infrastructure-asset",
+          category: group.subtype,
+          label: categoryVisual(group.subtype).label,
+          detail: group.location,
+          latitude: group.latitude,
+          longitude: group.longitude,
+          intensity: group.severity,
+        },
+      });
+    }
+    return out;
+  }, [assets, issues, events]);
 
-  const kpiTiles = [
-    { id: "infrastructure-issues", label: "Infrastructure Issues", value: String(allItems.length), caption: "Asset-condition records" },
-    { id: "critical-high", label: "Critical / High Priority", value: String(highOrCritical.length), caption: "Needs attention" },
-    { id: "corroborated", label: "Corroborated", value: "0", caption: "No multi-bus corroboration model yet" },
-    { id: "affected-locations", label: "Affected Locations", value: String(affectedLocations), caption: "Unique locations tracked" },
-  ];
-
-  // --- category filter ---
-  const categoryCounts = new Map<CategoryFilter, number>([["All", allItems.length]]);
-  for (const item of allItems) {
-    const bucket = infrastructureCategoryForAssetType(item.assetType);
-    categoryCounts.set(bucket, (categoryCounts.get(bucket) ?? 0) + 1);
-  }
-  const distributionBuckets = INFRASTRUCTURE_CATEGORIES.map((bucket) => ({ bucket, count: categoryCounts.get(bucket) ?? 0 }));
-
-  const filteredItems =
-    category === "All" ? allItems : allItems.filter((item) => infrastructureCategoryForAssetType(item.assetType) === category);
-  const needsAttention = [...filteredItems]
-    .filter((item) => item.severity === "critical" || item.severity === "high")
-    .sort((a, b) => (a.severity === b.severity ? 0 : a.severity === "critical" ? -1 : 1));
-
-  const markers: MapMarker[] = filteredItems.map((item) => ({
-    id: item.infrastructureIssueId,
-    kind: "infrastructure-asset",
-    label: `${item.location} · ${item.assetType.replace(/-/g, " ")}`,
-    latitude: item.latitude,
-    longitude: item.longitude,
-    intensity: item.severity,
-  }));
+  const needsAction = items.filter((i) => i.severity === "high" || i.severity === "critical" || i.status === "action-required").length;
 
   return (
     <>
       <PageHeader
-        eyebrow="Intelligence"
-        title="Infrastructure Intelligence"
-        description="Municipal infrastructure deficiencies — missing dividers, zebra crossings, signboards and road damage — observed by the public transport fleet."
+        title="Infrastructure"
+        context={
+          <>
+            <span className="tabular-nums">
+              {items.length} records · {needsAction} need action
+            </span>
+            <SourceBadge source="simulated" />
+          </>
+        }
       />
 
-      <KpiStrip tiles={kpiTiles} />
-
-      <CategoryFilterRow categories={INFRASTRUCTURE_CATEGORIES} active={category} onChange={setCategory} counts={categoryCounts} />
-
-      {needsAttention.length > 0 && (
-        <Panel className="p-space-sm flex flex-col gap-space-xs">
-          <PanelHeader title="Needs Attention" icon="priority_high" meta={<span className="font-label-code text-label-code text-ink-muted">{needsAttention.length} flagged</span>} />
-          <div className="flex flex-col divide-y divide-border-slate">
-            {needsAttention.map((item) => (
-              <div key={item.infrastructureIssueId} className="flex items-center justify-between gap-space-sm py-1.5">
-                <div className="flex flex-col gap-0.5 min-w-0">
-                  <span className="font-title-sm text-title-sm text-ink-primary font-semibold capitalize truncate">
-                    {item.assetType.replace(/-/g, " ")} &mdash; {item.condition}
-                  </span>
-                  <span className="font-body-sm text-body-sm text-ink-muted truncate">{item.location}</span>
-                </div>
-                <SeverityBadge severity={item.severity} className="shrink-0" />
+      <section aria-label="Condition board" className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6 gap-3">
+        {INFRASTRUCTURE_CATEGORIES.map((category) => {
+          const columnItems = items.filter((i) => i.category === category);
+          return (
+            <div key={category} className="flex flex-col gap-2 rounded-xl border border-line bg-surface-2/70 p-2.5 min-h-[168px]">
+              <div className="flex items-center gap-2 px-1 pt-0.5">
+                <IconTile icon={CATEGORY_ICON[category]} tone={columnItems.length ? CATEGORY_TONE[category] : "neutral"} size="sm" />
+                <h2 className={cn("flex-1 text-item leading-tight", columnItems.length ? "text-ink" : "text-ink-3")}>{category}</h2>
+                <span className="text-item text-ink-2 tabular-nums">{columnItems.length}</span>
               </div>
-            ))}
-          </div>
-        </Panel>
-      )}
-
-      <section className="grid grid-cols-1 xl:grid-cols-12 gap-space-md w-full items-start">
-        <div className="xl:col-span-8">
-          <Panel className="p-space-sm flex flex-col gap-space-xs">
-            <PanelHeader
-              title="Infrastructure Issue Intelligence"
-              icon="domain"
-              meta={<span className="font-label-code text-label-code text-ink-muted">{filteredItems.length} shown</span>}
-            />
-            {loading ? (
-              <div className="p-space-lg text-center font-body-sm text-body-sm text-ink-muted">Loading infrastructure issues…</div>
-            ) : (
-              <div className="flex flex-col divide-y divide-border-slate">
-                {filteredItems.map((item) => (
-                  <InfrastructureIssueCard key={item.infrastructureIssueId} item={item} />
-                ))}
-                {filteredItems.length === 0 && (
-                  <div className="p-space-lg text-center font-body-sm text-body-sm text-ink-muted">
-                    No infrastructure issues in this category.
-                  </div>
-                )}
-              </div>
-            )}
-          </Panel>
-        </div>
-
-        <div id="infrastructure-map" className="xl:col-span-4 flex flex-col gap-space-md">
-          <div className="h-[280px]">
-            <GISMap markers={markers} title="Infrastructure Locations" />
-          </div>
-          <DetectionDistributionChart
-            buckets={distributionBuckets}
-            title="Infrastructure by Category"
-            meta="Accumulated Intelligence"
-            icon="bar_chart"
-            emptyLabel="No infrastructure issues recorded yet."
-          />
-        </div>
+              {columnItems.length === 0 ? (
+                <p className="flex-1 flex items-center justify-center rounded-lg border border-dashed border-line-strong text-meta text-ink-3 text-center px-3 py-4">
+                  None detected
+                </p>
+              ) : (
+                <ul className="flex flex-col gap-2">
+                  {columnItems.map((item) => {
+                    const selected = item.id === selectedId;
+                    return (
+                      <li key={item.id}>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedId(selected ? null : item.id)}
+                          aria-pressed={selected}
+                          className={cn(
+                            "w-full flex flex-col gap-1.5 rounded-lg bg-surface border px-3 py-2.5 text-left shadow-panel transition-colors duration-150",
+                            selected ? "border-action ring-1 ring-action/30" : "border-line hover:border-line-strong",
+                          )}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <span className="text-item text-ink">{humanize(item.title)}</span>
+                            <SeverityBadge severity={item.severity} />
+                          </div>
+                          <span className="text-meta text-ink-3 truncate">{item.location}</span>
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-ink-3">
+                            {item.status ? (
+                              <StatusBadge tone={ISSUE_STATUS[item.status].tone}>{ISSUE_STATUS[item.status].label}</StatusBadge>
+                            ) : (
+                              <StatusBadge tone="neutral">Awaiting corroboration</StatusBadge>
+                            )}
+                            {item.busIds && (
+                              <span className="inline-flex items-center gap-1">
+                                <Bus size={12} aria-hidden="true" />
+                                {item.busIds.length}
+                              </span>
+                            )}
+                            <span className="tabular-nums ml-auto">{formatMinutesAgo(minutesAgo(item.observedAt, anchor))}</span>
+                          </div>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          );
+        })}
       </section>
+
+      <GISMap
+        className="h-[420px]"
+        ariaLabel="Infrastructure locations"
+        markers={items.map((i) => i.marker)}
+        selectedId={selectedId}
+        onSelect={setSelectedId}
+        fitToMarkers
+        showLayerPanel={false}
+      />
     </>
   );
 }

@@ -1,0 +1,19 @@
+{
+  "dataset": "OpenStreetMap major roads around monitored traffic corridors",
+  "license": "ODbL 1.0 — © OpenStreetMap contributors",
+  "endpoints": [
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass-api.de/api/interpreter"
+  ],
+  "radiusMetres": 3500,
+  "highwayFilter": "^(motorway|motorway_link|trunk|trunk_link|primary|secondary)$",
+  "corridors": [
+    "HOT-1",
+    "HOT-2",
+    "HOT-3",
+    "HOT-4"
+  ],
+  "wayCount": 1932,
+  "retrievedAt": "2026-09-23T20:50:48.904Z",
+  "note": "Geometry only. Congestion drawn on it is DEMO data until real bus-derived observations exist."
+}

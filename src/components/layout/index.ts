@@ -1,2 +1,2 @@
 export { AppShell } from "./AppShell";
-export { TopNav } from "./TopNav";
+export { Sidebar, MobileNav } from "./Sidebar";

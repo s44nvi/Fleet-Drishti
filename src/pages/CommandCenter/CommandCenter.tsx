@@ -1,156 +1,230 @@
-import { KpiStrip, EventActivityChart, DetectionDistributionChart } from "../../components/telemetry";
+import { useMemo, useState } from "react";
+import { AlertOctagon, Bus, FileWarning, MapPin, ScanEye } from "lucide-react";
+import { PageHeader, Panel, SourceBadge } from "../../components/ui";
+import { KpiStrip, CityPulse } from "../../components/telemetry";
 import { GISMap } from "../../components/gis";
-import {
-  EventFeed,
-  PriorityQueuePanel,
-  CorrelationPanel,
-  TopHotspotsPanel,
-  NeedsAttentionPanel,
-} from "../../components/events";
-import { LiveAIObservationPanel } from "../../components/ai";
+import { LiveEventList, TopLocations } from "../../components/events";
+import { DetectionPlayer } from "../../components/ai";
 import { useAsyncData } from "../../hooks/useAsyncData";
-import { analyticsService, eventService, fleetService, issueService, routeService } from "../../services";
-import { congestionToIntensity } from "../../lib/congestion";
-import type { MapMarker } from "../../types";
+import { analyticsService, eventService, fleetService, issueService, mediaService, routeService } from "../../services";
+import { groupEventsIntoIntelligence } from "../../lib/intelligenceGrouping";
+import { isInfrastructureAssetInScope, isRoadDomainType } from "../../lib/taxonomy";
+import { computeCityPulse, datasetAnchor } from "../../lib/pulse";
+import {
+  busMarker,
+  infrastructureMarker,
+  issueMarker,
+  nearestMarker,
+  observationGroupMarker,
+  safetyMarker,
+  trafficMarker,
+} from "../../lib/mapMarkers";
+import type { Hotspot } from "../../lib/hotspots";
+import type { Event, KpiTile, MapMarker } from "../../types";
 
-// Command Center: a centralized urban intelligence platform, not a
-// map-first GIS viewer. Section order deliberately answers, top to bottom:
-// WHAT is happening (KPIs) -> HOW MUCH / of WHAT TYPE (activity + detection
-// analytics) -> WHERE it's concentrated + WHAT needs action (hotspots +
-// attention queue) -> the live evidence feed and a compact spatial view.
-// The full GIS workspace lives on Live Map; this page's map is a small
-// situational-awareness tile, not the dominant element.
+const KPI_VISUALS: Record<string, Pick<KpiTile, "icon" | "tone">> = {
+  "buses-sensing": { icon: Bus, tone: "ok" },
+  observations: { icon: ScanEye, tone: "action" },
+  "open-issues": { icon: FileWarning, tone: "watch" },
+  critical: { icon: AlertOctagon, tone: "alert" },
+};
+
+function formatAnchor(iso: string) {
+  return new Date(iso).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+// Command Center: "What is happening across Mumbai right now?"
+// Hierarchy: 4 KPIs → the city situation map (primary workspace) → the AI
+// detection player (second visual) and latest events → city pulse and top
+// locations. Selecting an event, marker or location keeps the map, the
+// player and the lists in sync.
 export function CommandCenter() {
   const { data: kpis } = useAsyncData(() => analyticsService.getCommandCenterKpis(), []);
-  const { data: eventActivity } = useAsyncData(() => analyticsService.getEventActivityTrend(), []);
-  const { data: detectionDistribution } = useAsyncData(() => analyticsService.getDetectionDistribution(), []);
   const { data: buses } = useAsyncData(() => fleetService.listBuses(), []);
+  const { data: cameras } = useAsyncData(() => fleetService.listCameras(), []);
   const { data: issues } = useAsyncData(() => issueService.listIssues(), []);
-  const { data: priorityIssues } = useAsyncData(() => issueService.listPriorityIssues(), []);
-  const { data: topHotspots } = useAsyncData(() => issueService.listTopHotspots(), []);
   const { data: events } = useAsyncData(() => eventService.listEvents(), []);
   const { data: trafficHotspots } = useAsyncData(() => issueService.listTrafficHotspots(), []);
   const { data: safetyEvents } = useAsyncData(() => issueService.listSafetyEvents(), []);
   const { data: infrastructureIssues } = useAsyncData(() => issueService.listInfrastructureIssues(), []);
+  const { data: topHotspots } = useAsyncData(() => issueService.listTopHotspots(), []);
+  const { data: clips } = useAsyncData(() => mediaService.listDetectionClips(), []);
+  const { data: routes } = useAsyncData(() => routeService.listRoutes(), []);
   const { data: networkStops } = useAsyncData(() => routeService.listNetworkStops(), []);
   const { data: networkRouteLines } = useAsyncData(() => routeService.listNetworkRouteLines(), []);
 
-  // --- WHAT IS THE EVIDENCE: most recent event, its source bus, and the
-  // raw Detection it was promoted from (used to annotate the demo frame) ---
-  const mostRecentEvent = [...(events ?? [])].sort(
-    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
-  )[0];
-  const { data: mostRecentDetection } = useAsyncData(
-    () => (mostRecentEvent ? eventService.getDetectionForEvent(mostRecentEvent.eventId) : Promise.resolve(undefined)),
-    [mostRecentEvent?.eventId],
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null);
+  const [hoveredMarkerId, setHoveredMarkerId] = useState<string | null>(null);
+  const [activeClipId, setActiveClipId] = useState<string | null>(null);
+  const [focus, setFocus] = useState<{ latitude: number; longitude: number; key: string } | null>(null);
+  const [selectedLocation, setSelectedLocation] = useState<string | null>(null);
+
+  const allEvents = useMemo(() => events ?? [], [events]);
+  const allIssues = useMemo(() => issues ?? [], [issues]);
+
+  const anchor = useMemo(
+    () =>
+      datasetAnchor([
+        ...allEvents.map((e) => e.timestamp),
+        ...(safetyEvents ?? []).map((e) => e.observedAt),
+        ...(buses ?? []).map((b) => b.lastSeenAt),
+      ]),
+    [allEvents, safetyEvents, buses],
   );
 
-  // Stand-in for "now" — see lib/timeAgo.ts. Falls back to the current wall
-  // clock only if there are no events at all yet.
-  const anchor = mostRecentEvent?.timestamp ?? new Date().toISOString();
+  const markers = useMemo<MapMarker[]>(() => {
+    const roadIssues = allIssues.filter((issue) => isRoadDomainType(issue.type));
+    const fusedIds = new Set(roadIssues.map((i) => i.issueId));
+    const roadGroups = groupEventsIntoIntelligence(
+      allEvents.filter((e) => isRoadDomainType(e.eventType)),
+      roadIssues,
+    ).filter((g) => !fusedIds.has(g.key));
+    // Safety Issues are drawn through their underlying SafetyEvents
+    // (below) so a fused pedestrian issue isn't pinned twice.
+    const trafficIssues = allIssues.filter((issue) => issue.type === "traffic-blockage");
+    return [
+      ...(infrastructureIssues ?? []).filter((i) => isInfrastructureAssetInScope(i.assetType)).map(infrastructureMarker),
+      ...(trafficHotspots ?? []).map((h) => trafficMarker(h, anchor)),
+      ...trafficIssues.map((i) => issueMarker(i, anchor)),
+      ...(safetyEvents ?? []).map((e) => safetyMarker(e, anchor)),
+      ...roadGroups.map((g) => observationGroupMarker(g, anchor)),
+      ...roadIssues.map((i) => issueMarker(i, anchor)),
+      ...(buses ?? []).map(busMarker),
+    ];
+  }, [allIssues, allEvents, infrastructureIssues, trafficHotspots, safetyEvents, buses, anchor]);
 
-  // --- WHERE: map markers across every observation type, using each
-  // domain object's real latitude/longitude directly (no screen projection) ---
-  const busMarkers: MapMarker[] = (buses ?? []).map((bus) => ({
-    id: bus.busId,
-    kind: "bus-probe",
-    label: `${bus.label} · Route ${bus.routeId.replace("BEST-", "")}`,
-    latitude: bus.location.latitude,
-    longitude: bus.location.longitude,
-    href: `/fleet/${bus.busId}`,
-  }));
-  const issueMarkers: MapMarker[] = (issues ?? []).map((issue) => ({
-    id: issue.issueId,
-    kind: "critical-distress",
-    label: `${issue.issueId} · ${issue.location}`,
-    latitude: issue.latitude,
-    longitude: issue.longitude,
-    href: `/road-issues/${issue.issueId}`,
-  }));
-  const trafficMarkers: MapMarker[] = (trafficHotspots ?? []).map((hotspot) => ({
-    id: hotspot.hotspotId,
-    kind: "traffic-chokepoint",
-    label: `${hotspot.location} · ${hotspot.congestionLevel}`,
-    latitude: hotspot.latitude,
-    longitude: hotspot.longitude,
-    intensity: congestionToIntensity(hotspot.congestionLevel),
-  }));
-  const safetyMarkers: MapMarker[] = (safetyEvents ?? []).map((event) => ({
-    id: event.safetyEventId,
-    kind: "vulnerable-crossing",
-    label: `${event.location} · ${event.type.replace(/-/g, " ")}`,
-    latitude: event.latitude,
-    longitude: event.longitude,
-    intensity: event.severity,
-  }));
-  const infrastructureMarkers: MapMarker[] = (infrastructureIssues ?? []).map((item) => ({
-    id: item.infrastructureIssueId,
-    kind: "infrastructure-asset",
-    label: `${item.location} · ${item.assetType.replace(/-/g, " ")}`,
-    latitude: item.latitude,
-    longitude: item.longitude,
-  }));
+  const observationMarkers = useMemo(() => markers.filter((m) => m.kind !== "bus-probe"), [markers]);
+  const pulse = useMemo(() => (events && safetyEvents ? computeCityPulse(allEvents, safetyEvents, anchor) : undefined), [
+    events,
+    safetyEvents,
+    allEvents,
+    anchor,
+  ]);
+  const routeNames = useMemo(
+    () => Object.fromEntries((routes ?? []).map((r) => [r.routeId, `${r.origin} → ${r.destination}`])),
+    [routes],
+  );
+  const kpiTiles = (kpis ?? []).map((tile) => ({ ...tile, ...KPI_VISUALS[tile.id] }));
 
-  const observingBus = (buses ?? []).find((bus) => bus.busId === mostRecentEvent?.busId);
-  const relatedIssue = mostRecentEvent
-    ? (issues ?? []).find((issue) => issue.relatedEventIds.includes(mostRecentEvent.eventId))
-    : undefined;
+  function markerForEvent(event: Event): MapMarker | undefined {
+    const issue = allIssues.find((i) => i.relatedEventIds.includes(event.eventId));
+    const direct = issue && observationMarkers.find((m) => m.id === issue.issueId);
+    return direct ?? nearestMarker(observationMarkers, event.latitude, event.longitude);
+  }
 
-  // --- Correlation case study: the issue with the strongest multi-bus fusion ---
-  const strongestCorrelation = [...(issues ?? [])].sort((a, b) => b.observationCount - a.observationCount)[0];
+  function selectEvent(event: Event) {
+    setSelectedEventId(event.eventId);
+    setSelectedLocation(null);
+    const clip = clips?.find((c) => c.eventId === event.eventId);
+    if (clip) setActiveClipId(clip.clipId);
+    const marker = markerForEvent(event);
+    setSelectedMarkerId(marker?.id ?? null);
+    if (!marker) setFocus({ latitude: event.latitude, longitude: event.longitude, key: event.eventId });
+  }
+
+  function selectMarker(markerId: string | null) {
+    setSelectedMarkerId(markerId);
+    setSelectedLocation(null);
+    if (!markerId) return;
+    const marker = markers.find((m) => m.id === markerId);
+    if (!marker) return;
+    // The newest event behind this marker drives the player and list.
+    const candidates =
+      marker.kind === "bus-probe"
+        ? allEvents.filter((e) => e.busId === markerId)
+        : allEvents.filter((e) => markerForEvent(e)?.id === markerId);
+    const latest = [...candidates].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
+    if (latest) {
+      setSelectedEventId(latest.eventId);
+      const clip = clips?.find((c) => c.eventId === latest.eventId);
+      if (clip) setActiveClipId(clip.clipId);
+    } else {
+      setSelectedEventId(null);
+    }
+  }
+
+  function selectHotspot(hotspot: Hotspot) {
+    setSelectedLocation(hotspot.location);
+    setSelectedEventId(null);
+    setSelectedMarkerId(nearestMarker(observationMarkers, hotspot.latitude, hotspot.longitude)?.id ?? null);
+    setFocus({ latitude: hotspot.latitude, longitude: hotspot.longitude, key: hotspot.location });
+  }
+
+  function selectClip(clipId: string) {
+    setActiveClipId(clipId);
+    const clip = clips?.find((c) => c.clipId === clipId);
+    const event = clip?.eventId ? allEvents.find((e) => e.eventId === clip.eventId) : undefined;
+    if (event) selectEvent(event);
+  }
 
   return (
-    // Own tighter gap (overrides AppShell's shared gap-space-lg, which is
-    // sized for sparser pages) — keeps this content-dense page within
-    // roughly 1-2 viewport heights without dropping any section.
-    <div className="flex flex-col w-full gap-space-sm">
-      <KpiStrip tiles={kpis ?? []} />
+    <>
+      <PageHeader
+        title="Command Center"
+        context={
+          <>
+            <span className="inline-flex items-center gap-1">
+              <MapPin size={13} aria-hidden="true" />
+              Mumbai
+            </span>
+            <span aria-hidden="true">·</span>
+            <span>Data as of {formatAnchor(anchor)}</span>
+            <SourceBadge source="simulated" />
+          </>
+        }
+      />
 
-      {/* HOW MUCH, WHAT TYPE: activity trend + detection taxonomy */}
-      <section className="grid grid-cols-1 xl:grid-cols-2 gap-space-sm w-full items-stretch">
-        <EventActivityChart days={eventActivity ?? []} />
-        <DetectionDistributionChart buckets={detectionDistribution ?? []} />
-      </section>
+      <KpiStrip tiles={kpiTiles} />
 
-      {/* WHERE it's concentrated, WHAT needs attention right now */}
-      <section className="grid grid-cols-1 xl:grid-cols-2 gap-space-sm w-full items-stretch">
-        <TopHotspotsPanel hotspots={topHotspots ?? []} />
-        <NeedsAttentionPanel issues={priorityIssues ?? []} anchor={anchor} />
-      </section>
-
-      {/* Live evidence feed alongside a compact spatial overview. An even
-          column split (rather than feed-dominant) gives the map's layer
-          legend room to sit on one row so the canvas beneath it isn't
-          squeezed down to a sliver — the full GIS workspace still lives on
-          Live Map, so this tile stays modest, just not cramped. */}
-      <section className="grid grid-cols-1 xl:grid-cols-2 gap-space-sm w-full items-stretch h-[440px]">
-        <EventFeed events={events ?? []} issues={issues ?? []} />
+      <section className="grid grid-cols-1 xl:grid-cols-12 gap-4 xl:h-[700px]">
         <GISMap
-          markers={[...infrastructureMarkers, ...trafficMarkers, ...safetyMarkers, ...issueMarkers, ...busMarkers]}
+          className="xl:col-span-8 h-[440px] sm:h-[520px] xl:h-full"
+          ariaLabel="City situation map"
+          markers={markers}
           stops={networkStops ?? []}
           routeLines={networkRouteLines ?? []}
-          title="Situational Overview"
+          selectedId={selectedMarkerId}
+          hoveredId={hoveredMarkerId}
+          onSelect={selectMarker}
+          focus={focus}
+          fitToMarkers
+          expandHref="/live-map"
         />
-      </section>
-
-      {/* HOW the intelligence gets here: sensing pipeline + a worked
-          multi-bus correlation example */}
-      <section className="grid grid-cols-1 xl:grid-cols-12 gap-space-sm w-full items-stretch">
-        <div className="xl:col-span-7">
-          <LiveAIObservationPanel
-            bus={observingBus}
-            event={mostRecentEvent}
-            detection={mostRecentDetection}
-            eventLinkTo={relatedIssue ? `/road-issues/${relatedIssue.issueId}` : mostRecentEvent ? `/fleet/${mostRecentEvent.busId}` : undefined}
+        <div className="xl:col-span-4 flex flex-col gap-4 min-h-0">
+          <Panel as="section" className="p-4 shrink-0" aria-label="AI detection">
+            <DetectionPlayer
+              clips={clips ?? []}
+              activeClipId={activeClipId}
+              onActiveChange={selectClip}
+              routeNames={routeNames}
+              cameras={cameras ?? []}
+              linkFor={(clip) => {
+                const issue = allIssues.find((i) => clip.eventId && i.relatedEventIds.includes(clip.eventId));
+                return issue ? `/road-issues/${issue.issueId}` : `/fleet/${clip.busId}`;
+              }}
+            />
+          </Panel>
+          <LiveEventList
+            className="flex-1 max-h-[420px] xl:max-h-none"
+            events={allEvents}
+            anchor={anchor}
+            selectedEventId={selectedEventId}
+            onSelect={selectEvent}
+            onHover={(event) => setHoveredMarkerId(event ? markerForEvent(event)?.id ?? null : null)}
           />
         </div>
-        <div className="xl:col-span-5">
-          <CorrelationPanel issue={strongestCorrelation} />
-        </div>
       </section>
 
-      {/* WHAT action can be taken */}
-      <PriorityQueuePanel issues={priorityIssues ?? []} />
-    </div>
+      <section className="grid grid-cols-1 xl:grid-cols-12 gap-4">
+        <CityPulse className="xl:col-span-5" pulse={pulse} />
+        <TopLocations
+          className="xl:col-span-7"
+          hotspots={topHotspots ?? []}
+          selectedLocation={selectedLocation}
+          onSelect={selectHotspot}
+        />
+      </section>
+    </>
   );
 }

@@ -129,34 +129,57 @@ export function isVehicleIncidentCategory(category: SafetyEventCategory): boolea
 }
 
 // PS §"infrastructure deficiencies" taxonomy, used by the Infrastructure
-// page. This is a DIFFERENT domain from ROAD_ISSUE_CATEGORIES above: that
-// one buckets Event/Issue subtypes (type: "road-defect"/"environmental")
-// with zero fixture support for divider/zebra/signboard; this one buckets
-// the separate InfrastructureIssue fixture domain's real `assetType` field
-// (streetlight/drainage/barrier/signage/utility-pole — an asset-condition
-// registry, not part of the AI Detection->Event->Issue pipeline). "barrier"
-// is the closest existing asset type to a road divider; no asset type
-// represents a zebra crossing or generic road damage today, so those stay
-// at their real, honest zero count rather than borrowing Road Issues' data
-// and double-counting it under a different page.
+// page — exactly the SIH PS categories, nothing broader. Records reach it
+// from two real sources:
+//  - the InfrastructureIssue fixture domain, via its `assetType`
+//    ("barrier" -> divider, "signage" -> signboard);
+//  - road Events/Issues whose subtype is one of these PS categories
+//    (road damage, waterlogging, divider/zebra/signboard subtypes).
+// Generic smart-city asset types in the fixtures (streetlight, drainage,
+// utility-pole) are outside the PS and map to null — they are not shown
+// under a borrowed PS label. Potholes stay on Road Issues.
 export const INFRASTRUCTURE_CATEGORIES = [
   "Missing Divider",
   "Missing/Faded Zebra Crossing",
   "Damaged/Missing Signboard",
   "Road Damage",
+  "Waterlogging",
   "Other Road Hazard",
 ] as const;
 export type InfrastructureCategory = (typeof INFRASTRUCTURE_CATEGORIES)[number];
 
-export function infrastructureCategoryForAssetType(assetType: string): InfrastructureCategory {
+export function infrastructureCategoryForAssetType(assetType: string): InfrastructureCategory | null {
   switch (assetType) {
     case "barrier":
       return "Missing Divider";
     case "signage":
       return "Damaged/Missing Signboard";
     default:
-      // streetlight / drainage / utility-pole, or any future asset type
-      // that isn't one of the PS's specifically named categories.
-      return "Other Road Hazard";
+      // streetlight / drainage / utility-pole: not SIH PS categories.
+      return null;
   }
+}
+
+export function infrastructureCategoryForSubtype(subtype: string): InfrastructureCategory | null {
+  switch (subtype) {
+    case "missing-divider":
+      return "Missing Divider";
+    case "faded-crossing":
+    case "missing-crossing":
+      return "Missing/Faded Zebra Crossing";
+    case "damaged-signboard":
+    case "missing-signboard":
+      return "Damaged/Missing Signboard";
+    case "road-damage":
+    case "surface-crack":
+      return "Road Damage";
+    case "waterlogging":
+      return "Waterlogging";
+    default:
+      return null;
+  }
+}
+
+export function isInfrastructureAssetInScope(assetType: string): boolean {
+  return infrastructureCategoryForAssetType(assetType) !== null;
 }

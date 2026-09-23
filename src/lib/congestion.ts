@@ -21,8 +21,8 @@ export const CONGESTION_DISPLAY_LABEL: Record<CongestionLevel, string> = {
 // Reused everywhere a congestion badge is rendered (Traffic page, its
 // corridor/bottleneck cards) so severity color always means the same thing.
 export const CONGESTION_TONE: Record<CongestionLevel, BadgeTone> = {
-  low: "success",
-  medium: "info",
-  high: "high",
-  severe: "critical",
+  low: "ok",
+  medium: "watch",
+  high: "alert",
+  severe: "alert",
 };

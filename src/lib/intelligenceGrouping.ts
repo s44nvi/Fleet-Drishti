@@ -1,4 +1,6 @@
-import type { Event, Issue } from "../types";
+import type { Event, Issue, Severity } from "../types";
+
+const SEVERITY_RANK: Record<Severity, number> = { low: 0, medium: 1, high: 2, critical: 3 };
 
 export interface IntelligenceGroup {
   key: string;
@@ -19,6 +21,10 @@ export interface IntelligenceGroup {
   lastObserved: string;
   linkTo: string;
   corroborated: boolean;
+  /** Every Event in the group, oldest first. */
+  eventIds: string[];
+  /** Highest severity among the group's Events. */
+  severity: Severity;
 }
 
 // Groups raw per-bus Events into one intelligence card per real-world
@@ -45,6 +51,8 @@ export function groupEventsIntoIntelligence(events: Event[], issues: Issue[]): I
       existing.latitude = event.latitude;
       existing.longitude = event.longitude;
       existing.corroborated = existing.busIds.length > 1;
+      existing.eventIds.push(event.eventId);
+      if (SEVERITY_RANK[event.severity] > SEVERITY_RANK[existing.severity]) existing.severity = event.severity;
       continue;
     }
 
@@ -61,6 +69,8 @@ export function groupEventsIntoIntelligence(events: Event[], issues: Issue[]): I
       lastObserved: event.timestamp,
       linkTo: issue ? `/road-issues/${issue.issueId}` : `/fleet/${event.busId}`,
       corroborated: false,
+      eventIds: [event.eventId],
+      severity: event.severity,
     });
   }
 

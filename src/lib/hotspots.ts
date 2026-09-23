@@ -32,6 +32,10 @@ export interface Hotspot {
    * (heaviest first) — a hotspot is aggregated intelligence, not a single
    * detection type, so this is a list rather than one "dominant type". */
   types: TaxonomyBucket[];
+  /** Coordinates of the heaviest single record in the cluster — where the
+   * map flies to when this hotspot is selected. */
+  latitude: number;
+  longitude: number;
 }
 
 interface HotspotInputs {
@@ -48,27 +52,31 @@ interface HotspotInputs {
 // (observationCount, observingBusCount) so a hotspot backed by heavier
 // multi-bus corroboration ranks above one backed by a single row.
 export function computeTopHotspots({ issues, trafficHotspots, safetyEvents, infrastructureIssues }: HotspotInputs): Hotspot[] {
-  const clusters = new Map<string, { total: number; types: Map<TaxonomyBucket, number> }>();
+  const clusters = new Map<
+    string,
+    { total: number; types: Map<TaxonomyBucket, number>; anchor: { weight: number; latitude: number; longitude: number } }
+  >();
 
-  function add(location: string, weight: number, bucket: TaxonomyBucket) {
+  function add(location: string, weight: number, bucket: TaxonomyBucket, latitude: number, longitude: number) {
     const area = canonicalArea(location);
-    const cluster = clusters.get(area) ?? { total: 0, types: new Map() };
+    const cluster = clusters.get(area) ?? { total: 0, types: new Map(), anchor: { weight: -1, latitude, longitude } };
+    if (weight > cluster.anchor.weight) cluster.anchor = { weight, latitude, longitude };
     cluster.total += weight;
     cluster.types.set(bucket, (cluster.types.get(bucket) ?? 0) + weight);
     clusters.set(area, cluster);
   }
 
   for (const issue of issues) {
-    add(issue.location, Math.max(issue.observationCount, 1), bucketForSubtype(issue.subtype));
+    add(issue.location, Math.max(issue.observationCount, 1), bucketForSubtype(issue.subtype), issue.latitude, issue.longitude);
   }
   for (const hotspot of trafficHotspots) {
-    add(hotspot.location, hotspot.observingBusCount, "Traffic / Congestion");
+    add(hotspot.location, hotspot.observingBusCount, "Traffic / Congestion", hotspot.latitude, hotspot.longitude);
   }
   for (const event of safetyEvents) {
-    add(event.location, 1, bucketForSubtype(event.type));
+    add(event.location, 1, bucketForSubtype(event.type), event.latitude, event.longitude);
   }
   for (const item of infrastructureIssues) {
-    add(item.location, 1, "Infrastructure");
+    add(item.location, 1, "Infrastructure", item.latitude, item.longitude);
   }
 
   return Array.from(clusters.entries())
@@ -77,7 +85,7 @@ export function computeTopHotspots({ issues, trafficHotspots, safetyEvents, infr
         .sort((a, b) => b[1] - a[1])
         .map(([bucket]) => bucket)
         .slice(0, 3);
-      return { location, count: cluster.total, types };
+      return { location, count: cluster.total, types, latitude: cluster.anchor.latitude, longitude: cluster.anchor.longitude };
     })
     .sort((a, b) => b.count - a.count);
 }

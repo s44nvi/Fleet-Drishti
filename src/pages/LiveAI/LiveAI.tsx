@@ -1,66 +1,99 @@
-import { PageHeader, Panel, PanelHeader, DataTable, StatusBadge } from "../../components/ui";
-import { EdgePipelinePanel } from "../../components/ai";
+import { useState } from "react";
+import { ScanEye } from "lucide-react";
+import { PageHeader, Panel, PanelHeader, SourceBadge, StatusBadge } from "../../components/ui";
+import { DetectionPlayer } from "../../components/ai";
 import { useAsyncData } from "../../hooks/useAsyncData";
-import { eventService, fleetService } from "../../services";
-import type { DataTableColumn, Detection, PipelineStepData } from "../../types";
+import { eventService, fleetService, mediaService, routeService } from "../../services";
+import { TONE_HEX, categoryVisual } from "../../lib/visuals";
+import { cn } from "../../lib/cn";
 
-// This screen simulates the edge inference stream from mock fixtures. It is
-// deliberately structured around eventService.listDetections() — a single
-// data-fetching call — so that swapping the mock body for a live
-// WebSocket/SSE subscription later only changes src/services/eventService.ts,
-// not this page or the DataTable/EdgePipelinePanel components it renders.
-const PIPELINE_STEPS: PipelineStepData[] = [
-  { id: "p1", order: 1, label: "Video Ingestion", status: "complete", detail: "60fps" },
-  { id: "p2", order: 2, label: "Frame Analysis", status: "complete", detail: "18.2ms" },
-  { id: "p3", order: 3, label: "Object Detection", status: "complete", detail: "4 BBoxes" },
-  { id: "p4", order: 4, label: "Tracking & Spatial Filter", status: "complete", detail: "Dedupe OK" },
-  { id: "p5", order: 5, label: "Event Generation", status: "complete", detail: "Complete" },
-  { id: "p6", order: 6, label: "Metadata Attached", status: "complete", detail: "GPS Valid" },
-  { id: "p7", order: 7, label: "Synced to City Platform", status: "complete", detail: "Synced" },
-];
+function clock(timestamp: string) {
+  return new Date(timestamp).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
 
-const columns: DataTableColumn<Detection>[] = [
-  { key: "detectionId", header: "Detection", render: (d) => <span className="font-label-code text-label-code font-semibold">{d.detectionId}</span> },
-  { key: "bus", header: "Bus", render: (d) => d.busId },
-  { key: "camera", header: "Camera", render: (d) => d.cameraId },
-  { key: "class", header: "Object Class", render: (d) => <span className="capitalize">{d.objectClass.replace(/-/g, " ")}</span> },
-  { key: "confidence", header: "Confidence", render: (d) => `${d.confidence}%`, align: "right" },
-  {
-    key: "status",
-    header: "Pipeline Outcome",
-    render: (d) => (d.eventId ? <StatusBadge tone="success">Promoted to Event</StatusBadge> : <StatusBadge tone="info">Below Threshold</StatusBadge>),
-  },
-];
-
+// AI detections: every raw detection record, and whether it was promoted to
+// a validated observation. Promoted detections open in the player. No
+// throughput/latency/model-health figures are shown — none exist in the data.
 export function LiveAI() {
   const { data: detections, loading } = useAsyncData(() => eventService.listDetections(), []);
-  const { data: buses } = useAsyncData(() => fleetService.listBuses(), []);
-  const primaryBus = buses?.[0];
+  const { data: clips } = useAsyncData(() => mediaService.listDetectionClips(), []);
+  const { data: cameras } = useAsyncData(() => fleetService.listCameras(), []);
+  const { data: routes } = useAsyncData(() => routeService.listRoutes(), []);
+  const [activeClipId, setActiveClipId] = useState<string | null>(null);
+
+  const sorted = [...(detections ?? [])].sort((a, b) => new Date(b.frameTimestamp).getTime() - new Date(a.frameTimestamp).getTime());
+  const promoted = sorted.filter((d) => d.eventId).length;
+  const routeNames = Object.fromEntries((routes ?? []).map((r) => [r.routeId, `${r.origin} → ${r.destination}`]));
+  const activeClip = (clips ?? []).find((c) => c.clipId === activeClipId) ?? clips?.[0];
 
   return (
     <>
       <PageHeader
-        eyebrow="Analytics"
-        title="Live Edge-AI Processing"
-        description="Live inference pipeline telemetry from edge compute nodes."
+        title="AI detections"
+        context={
+          <>
+            <span className="tabular-nums">
+              {sorted.length} detections · {promoted} promoted to observations
+            </span>
+            <SourceBadge source="demo" detail="no footage attached" />
+          </>
+        }
       />
 
-      <EdgePipelinePanel
-        feedLabel={primaryBus ? `${primaryBus.label} · Route ${primaryBus.routeId.replace("BEST-", "")} · Front Cam` : "Fleet camera"}
-        statusLabel="Processing"
-        steps={PIPELINE_STEPS}
-      />
+      <section className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-start">
+        <Panel as="section" className="xl:col-span-7 p-4" aria-label="Detection player">
+          <DetectionPlayer
+            clips={clips ?? []}
+            activeClipId={activeClipId}
+            onActiveChange={setActiveClipId}
+            routeNames={routeNames}
+            cameras={cameras ?? []}
+          />
+        </Panel>
 
-      <Panel className="overflow-hidden">
-        <div className="p-space-sm">
-          <PanelHeader title="Raw Detection Stream" icon="sensors" meta={<span className="font-label-code text-label-code text-ink-muted">Detection -&gt; Event promotion</span>} />
-        </div>
-        {loading ? (
-          <div className="p-space-lg text-center font-body-sm text-body-sm text-ink-muted">Loading detection stream…</div>
-        ) : (
-          <DataTable columns={columns} rows={detections ?? []} getRowKey={(d) => d.detectionId} emptyLabel="No detections yet." />
-        )}
-      </Panel>
+        <Panel as="section" className="xl:col-span-5 flex flex-col" aria-label="Detection records">
+          <PanelHeader className="px-4 pt-4 pb-2" title="Detection records" icon={ScanEye} meta={`${sorted.length}`} />
+          {loading ? (
+            <p className="p-6 text-body text-ink-3">Loading detections…</p>
+          ) : (
+            <ul className="px-2 pb-2">
+              {sorted.map((d) => {
+                const visual = categoryVisual(d.objectClass);
+                const clip = (clips ?? []).find((c) => c.eventId && c.eventId === d.eventId);
+                const selected = clip && clip.clipId === activeClip?.clipId;
+                const body = (
+                  <>
+                    <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ backgroundColor: TONE_HEX[visual.tone] }} aria-hidden="true" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-item text-ink">{visual.label}</p>
+                      <p className="text-meta text-ink-3 truncate">
+                        {d.busId} · {d.cameraId} · {clock(d.frameTimestamp)}
+                      </p>
+                    </div>
+                    <span className="text-meta text-ink-2 tabular-nums">{(d.confidence / 100).toFixed(2)}</span>
+                    {d.eventId ? <StatusBadge tone="ok">Promoted</StatusBadge> : <StatusBadge tone="neutral">Below threshold</StatusBadge>}
+                  </>
+                );
+                const rowClass = cn(
+                  "w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-left",
+                  selected ? "bg-action-soft ring-1 ring-action/30" : clip && "hover:bg-surface-2",
+                );
+                return (
+                  <li key={d.detectionId}>
+                    {clip ? (
+                      <button type="button" className={rowClass} onClick={() => setActiveClipId(clip.clipId)} aria-pressed={selected}>
+                        {body}
+                      </button>
+                    ) : (
+                      <div className={rowClass}>{body}</div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </Panel>
+      </section>
     </>
   );
 }

@@ -1,213 +1,179 @@
-import { useState } from "react";
-import { PageHeader, Panel, PanelHeader, CategoryFilterRow } from "../../components/ui";
-import { KpiStrip } from "../../components/telemetry";
-import { IssueCard, IntelligenceCard } from "../../components/events";
-import { PedestrianRiskCard, VehicleIncidentPanel } from "../../components/safety";
+import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import { Bus, CarFront, ShieldAlert } from "lucide-react";
+import { EmptyState, FilterChips, IconTile, PageHeader, Panel, PanelHeader, SeverityBadge, SourceBadge } from "../../components/ui";
 import { GISMap } from "../../components/gis";
 import { useAsyncData } from "../../hooks/useAsyncData";
-import { eventService, issueService } from "../../services";
-import { groupEventsIntoIntelligence } from "../../lib/intelligenceGrouping";
-import {
-  SAFETY_EVENT_CATEGORIES,
-  isVehicleIncidentCategory,
-  safetyCategoryForType,
-  type SafetyEventCategory,
-} from "../../lib/taxonomy";
-import type { Event, Issue, MapMarker, SafetyEvent } from "../../types";
+import { eventService, issueService, routeService } from "../../services";
+import { SAFETY_EVENT_CATEGORIES, safetyCategoryForType, type SafetyEventCategory } from "../../lib/taxonomy";
+import { safetyMarker } from "../../lib/mapMarkers";
+import { SEVERITY_TONE, categoryVisual } from "../../lib/visuals";
+import { datasetAnchor } from "../../lib/pulse";
+import { cn } from "../../lib/cn";
+import type { Event, Issue, SafetyEvent, Severity } from "../../types";
 
 type CategoryFilter = "All" | SafetyEventCategory;
 
-// A SafetyEvent that was also promoted through the Event -> Issue pipeline
-// shares its busId + exact timestamp with the originating Event (see
-// data/mock/safety.ts vs events.ts: SE-1/SE-2 mirror EVT-PED-1/EVT-PED-2
-// exactly). That's the only linkage available without a shared id, so this
-// is a best-effort match, not a guess — an exact bus+timestamp collision
-// only happens because the fixtures were authored to represent the same
-// real-world sighting twice (once as the lightweight monitoring signal,
-// once as the full AI pipeline record).
-function findMatchedIssue(safetyEvent: SafetyEvent, events: Event[], issues: Issue[]): Issue | undefined {
-  const matchingEvent = events.find(
-    (event) => event.busId === safetyEvent.busId && event.timestamp === safetyEvent.observedAt,
-  );
-  if (!matchingEvent) return undefined;
-  return issues.find((issue) => issue.relatedEventIds.includes(matchingEvent.eventId));
+const SEVERITY_WEIGHT: Record<Severity, number> = { low: 0.35, medium: 0.6, high: 0.85, critical: 1 };
+
+// A SafetyEvent and an Event with the same bus + timestamp are the same
+// sighting; if that Event was fused into an Issue, the signal is corroborated.
+function matchedIssue(signal: SafetyEvent, events: Event[], issues: Issue[]): Issue | undefined {
+  const event = events.find((e) => e.busId === signal.busId && e.timestamp === signal.observedAt);
+  return event ? issues.find((i) => i.relatedEventIds.includes(event.eventId)) : undefined;
 }
 
-// Safety Intelligence: PS §"vulnerable pedestrian situations" (school
-// children crossing, etc.) and §"hit-and-run / rash driving" vehicle
-// tracking + ANPR. Two distinct populations, kept visually separate:
-//
-//  - mockSafetyEvents — the primary, always-on pedestrian/vulnerable-road-
-//    user monitoring signal (same architectural role as Traffic's
-//    TrafficHotspot). All 6 fixtures are real.
-//  - the Event/Issue pipeline (eventType/type === "safety") — the subset of
-//    those signals that has been corroborated across multiple buses into a
-//    fused Issue (currently just SF-302, Sion Circle). Reuses the exact
-//    grouping logic already built for Road Issues — no second grouping
-//    system.
-//
-// Vehicle Incident Intelligence (rash driving / hit-and-run / ANPR) has no
-// supporting fixture data anywhere in this codebase — see
-// VehicleIncidentPanel's doc comment. It is shown as a real, empty,
-// PS-aligned taxonomy rather than fabricated incidents.
+function clock(iso: string) {
+  return new Date(iso).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+}
+
+// Safety: "Where are people and vehicles at risk?"
+// A risk map (signal density weighted by severity) beside an incident
+// timeline. Vehicle incidents / ANPR have no data or model yet and say so.
 export function Safety() {
   const { data: safetyEvents, loading } = useAsyncData(() => issueService.listSafetyEvents(), []);
   const { data: issues } = useAsyncData(() => issueService.listIssues(), []);
   const { data: events } = useAsyncData(() => eventService.listEvents(), []);
+  const { data: networkRouteLines } = useAsyncData(() => routeService.listNetworkRouteLines(), []);
+
   const [category, setCategory] = useState<CategoryFilter>("All");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
 
-  const allSafetyEvents = safetyEvents ?? [];
-  const allIssues = issues ?? [];
-  const allEvents = events ?? [];
+  const all = useMemo(() => safetyEvents ?? [], [safetyEvents]);
+  const anchor = useMemo(() => datasetAnchor(all.map((e) => e.observedAt)), [all]);
 
-  const safetyIssues = allIssues.filter((issue) => issue.type === "safety");
-  const safetyPipelineEvents = allEvents.filter((event) => event.eventType === "safety");
-  const standaloneGroups = (() => {
-    const issueIds = new Set(safetyIssues.map((issue) => issue.issueId));
-    return groupEventsIntoIntelligence(safetyPipelineEvents, safetyIssues).filter((group) => !issueIds.has(group.key));
-  })();
+  const counts = useMemo(() => {
+    const map = new Map<CategoryFilter, number>([["All", all.length]]);
+    for (const e of all) {
+      const bucket = safetyCategoryForType(e.type);
+      map.set(bucket, (map.get(bucket) ?? 0) + 1);
+    }
+    return map;
+  }, [all]);
 
-  // --- A: KPIs — every value real and traceable to one of the two
-  // populations above; "Corroborated Events" uses the same definition as
-  // Road Issues' equivalent metric (2+ buses observing) ---
-  const categoryCounts = new Map<CategoryFilter, number>([["All", allSafetyEvents.length]]);
-  for (const event of allSafetyEvents) {
-    const bucket = safetyCategoryForType(event.type);
-    categoryCounts.set(bucket, (categoryCounts.get(bucket) ?? 0) + 1);
-  }
-  const vehicleIncidentCount = SAFETY_EVENT_CATEGORIES.filter(isVehicleIncidentCategory).reduce(
-    (sum, cat) => sum + (categoryCounts.get(cat) ?? 0),
-    0,
+  const visible = useMemo(
+    () =>
+      (category === "All" ? all : all.filter((e) => safetyCategoryForType(e.type) === category)).sort(
+        (a, b) => new Date(b.observedAt).getTime() - new Date(a.observedAt).getTime(),
+      ),
+    [all, category],
   );
-  const corroboratedCount =
-    safetyIssues.filter((issue) => issue.observationCount > 1).length +
-    standaloneGroups.filter((group) => group.corroborated).length;
 
-  const kpiTiles = [
-    { id: "active-safety-events", label: "Active Safety Events", value: String(allSafetyEvents.length), caption: "Monitored signals" },
-    {
-      id: "critical-incidents",
-      label: "Critical Incidents",
-      value: String(allSafetyEvents.filter((e) => e.severity === "critical").length),
-      caption: "Highest severity",
-    },
-    {
-      id: "pedestrian-risks",
-      label: "Pedestrian Risks",
-      value: String(allSafetyEvents.filter((e) => e.type === "pedestrian-conflict" || e.type === "crossing-risk").length),
-      caption: "Conflict / crossing risk",
-    },
-    { id: "vehicle-incidents", label: "Vehicle Incidents", value: String(vehicleIncidentCount), caption: "ANPR / tracking not yet connected" },
-    { id: "corroborated", label: "Corroborated Events", value: String(corroboratedCount), caption: "2+ buses observing" },
-  ];
-
-  // --- B2/C: category filter, applied to both the grouped Issue list (B)
-  // and the pedestrian-risk cards (C) ---
-  const filteredSafetyEvents =
-    category === "All" ? allSafetyEvents : allSafetyEvents.filter((e) => safetyCategoryForType(e.type) === category);
-  const filteredIssues =
-    category === "All" ? safetyIssues : safetyIssues.filter((issue) => safetyCategoryForType(issue.subtype) === category);
-  const filteredGroups =
-    category === "All" ? standaloneGroups : standaloneGroups.filter((group) => safetyCategoryForType(group.subtype) === category);
-
-  // --- E: incident map — built from the complete real SafetyEvent
-  // population (not the Issue/group population, which would duplicate the
-  // same real-world location a second time for Sion Circle) ---
-  const markers: MapMarker[] = filteredSafetyEvents.map((event) => {
-    const matchedIssue = findMatchedIssue(event, allEvents, allIssues);
-    return {
-      id: event.safetyEventId,
-      kind: "vulnerable-crossing",
-      label: `${event.location} · ${event.type.replace(/-/g, " ")}`,
-      latitude: event.latitude,
-      longitude: event.longitude,
-      intensity: event.severity,
-      href: matchedIssue ? `/road-issues/${matchedIssue.issueId}` : undefined,
-    };
+  const markers = visible.map((e) => {
+    const issue = matchedIssue(e, events ?? [], issues ?? []);
+    return safetyMarker(e, anchor, issue ? `/road-issues/${issue.issueId}` : undefined);
   });
+  const heatPoints = visible.map((e) => ({ longitude: e.longitude, latitude: e.latitude, weight: SEVERITY_WEIGHT[e.severity] }));
+  const highCount = all.filter((e) => e.severity === "high" || e.severity === "critical").length;
 
-  const vehicleCategoryCounts = SAFETY_EVENT_CATEGORIES.filter(isVehicleIncidentCategory).map((label) => ({
-    label,
-    count: categoryCounts.get(label) ?? 0,
-  }));
+  function select(id: string | null) {
+    setSelectedId(id);
+    if (id) document.getElementById(`safety-${id}`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
 
   return (
     <>
       <PageHeader
-        eyebrow="Intelligence"
-        title="Safety Intelligence"
-        description="Vulnerable pedestrian risk and vehicle incident intelligence from the public transport fleet."
+        title="Safety"
+        context={
+          <>
+            <span className="tabular-nums">
+              {all.length} risk signals · {highCount} high severity
+            </span>
+            <SourceBadge source="simulated" />
+          </>
+        }
       />
 
-      <KpiStrip tiles={kpiTiles} columns={5} />
+      <FilterChips categories={SAFETY_EVENT_CATEGORIES} active={category} onChange={setCategory} counts={counts} />
 
-      {/* B4: category filter — PS taxonomy including zero-count categories */}
-      <CategoryFilterRow categories={SAFETY_EVENT_CATEGORIES} active={category} onChange={setCategory} counts={categoryCounts} />
+      <section className="grid grid-cols-1 xl:grid-cols-12 gap-4 xl:h-[calc(100dvh-13rem)] xl:min-h-[560px]">
+        <GISMap
+          className="xl:col-span-7 h-[460px] xl:h-full"
+          ariaLabel="Safety risk map"
+          markers={markers}
+          routeLines={networkRouteLines ?? []}
+          heatmap={{ points: heatPoints, label: "Risk density" }}
+          selectedId={selectedId}
+          hoveredId={hoveredId}
+          onSelect={select}
+          fitToMarkers
+        />
 
-      <section className="grid grid-cols-1 xl:grid-cols-12 gap-space-md w-full items-start">
-        {/* B: Active Safety Events — the corroborated Issue/Event-pipeline
-            view, reusing the exact same components/grouping as Road Issues */}
-        <div className="xl:col-span-7 flex flex-col gap-space-md">
-          <Panel className="p-space-sm flex flex-col gap-space-xs">
-            <PanelHeader
-              title="Active Safety Events"
-              icon="shield"
-              meta={<span className="font-label-code text-label-code text-ink-muted">{filteredIssues.length + filteredGroups.length} corroborated / live</span>}
-            />
-            {loading ? (
-              <div className="p-space-lg text-center font-body-sm text-body-sm text-ink-muted">Loading safety events…</div>
-            ) : (
-              <div className="flex flex-col divide-y divide-border-slate">
-                {filteredIssues.map((issue) => (
-                  <IssueCard key={issue.issueId} issue={issue} />
-                ))}
-                {filteredGroups.map((group) => (
-                  <div key={group.key} className="flex flex-col gap-1">
-                    <span className="font-label-eyebrow text-label-eyebrow text-ink-muted uppercase tracking-widest pt-space-xs">
-                      Live Observation &middot; Not Yet Corroborated
-                    </span>
-                    <IntelligenceCard group={group} />
-                  </div>
-                ))}
-                {filteredIssues.length === 0 && filteredGroups.length === 0 && (
-                  <div className="p-space-lg text-center font-body-sm text-body-sm text-ink-muted">
-                    No safety events have reached the Event/Issue pipeline in this category yet.
-                  </div>
-                )}
-              </div>
-            )}
-          </Panel>
-
-          {/* D: Vehicle Incident Intelligence */}
-          <VehicleIncidentPanel categoryCounts={vehicleCategoryCounts} />
-        </div>
-
-        {/* E: Incident map — real coordinates, severity-shaded markers */}
-        <div className="xl:col-span-5 flex flex-col gap-space-md">
-          <div className="h-[320px]">
-            <GISMap markers={markers} title="Incident Map" />
-          </div>
-        </div>
+        <Panel as="section" className="xl:col-span-5 flex flex-col min-h-0" aria-label="Incident timeline">
+          <PanelHeader className="px-4 pt-4 pb-2" title="Incident timeline" icon={ShieldAlert} meta={`${visible.length}`} />
+          {loading ? (
+            <p className="p-6 text-body text-ink-3">Loading safety signals…</p>
+          ) : visible.length === 0 ? (
+            <EmptyState icon={ShieldAlert} title="No signals in this category" />
+          ) : (
+            <ol className="flex-1 min-h-0 overflow-y-auto px-4 pb-4 pt-1">
+              {visible.map((signal, index) => {
+                const visual = categoryVisual(signal.type);
+                const issue = matchedIssue(signal, events ?? [], issues ?? []);
+                const selected = signal.safetyEventId === selectedId;
+                const last = index === visible.length - 1;
+                return (
+                  <li key={signal.safetyEventId} id={`safety-${signal.safetyEventId}`} className="grid grid-cols-[44px_20px_1fr] gap-x-2">
+                    <time dateTime={signal.observedAt} className="text-meta text-ink-3 tabular-nums pt-3">
+                      {clock(signal.observedAt)}
+                    </time>
+                    <div className="relative flex justify-center" aria-hidden="true">
+                      {!last && <span className="absolute top-5 bottom-0 w-px bg-line" />}
+                      <span className={cn("relative mt-4 h-2.5 w-2.5 rounded-full ring-4 ring-surface", selected ? "bg-action" : "bg-safety")} />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => select(selected ? null : signal.safetyEventId)}
+                      onMouseEnter={() => setHoveredId(signal.safetyEventId)}
+                      onMouseLeave={() => setHoveredId(null)}
+                      aria-pressed={selected}
+                      className={cn(
+                        "mb-1.5 min-w-0 flex items-start gap-3 rounded-lg px-3 py-2.5 text-left transition-colors duration-150",
+                        selected ? "bg-action-soft ring-1 ring-action/30" : "hover:bg-surface-2",
+                      )}
+                    >
+                      <IconTile icon={visual.icon} tone={SEVERITY_TONE[signal.severity] === "ok" ? "neutral" : "safety"} size="sm" />
+                      <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-item text-ink truncate">{visual.label}</span>
+                          <SeverityBadge severity={signal.severity} />
+                        </div>
+                        <span className="text-meta text-ink-3 truncate">{signal.location}</span>
+                        <span className="text-meta text-ink-3 flex flex-wrap items-center gap-x-2">
+                          <span className="inline-flex items-center gap-1">
+                            <Bus size={12} aria-hidden="true" />
+                            {signal.busId}
+                          </span>
+                          <span className="tabular-nums">{signal.confidence}% confidence</span>
+                        </span>
+                        {issue && <span className="text-meta text-ok-ink">Corroborated · {issue.observingBuses.length} buses</span>}
+                      </div>
+                    </button>
+                    {issue && selected && (
+                      <Link
+                        to={`/road-issues/${issue.issueId}`}
+                        className="col-start-3 -mt-1 mb-2 ml-3 text-meta font-semibold text-action hover:text-action-strong w-fit"
+                      >
+                        Open issue {issue.issueId}
+                      </Link>
+                    )}
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+        </Panel>
       </section>
 
-      {/* C: Vulnerable Pedestrian Risk — every monitored signal, corroborated or not */}
-      <Panel className="p-space-sm flex flex-col gap-space-sm">
-        <PanelHeader
-          title="Vulnerable Pedestrian Risk"
-          icon="directions_walk"
-          meta={<span className="font-label-code text-label-code text-ink-muted">{filteredSafetyEvents.length} monitored</span>}
-        />
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-space-sm">
-          {filteredSafetyEvents.map((event) => (
-            <PedestrianRiskCard
-              key={event.safetyEventId}
-              event={event}
-              matchedIssue={findMatchedIssue(event, allEvents, allIssues)}
-            />
-          ))}
-          {filteredSafetyEvents.length === 0 && (
-            <span className="p-space-md font-body-sm text-body-sm text-ink-muted">No pedestrian risk signals in this category.</span>
-          )}
+      <Panel as="section" className="p-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
+        <IconTile icon={CarFront} tone="neutral" size="lg" />
+        <div className="flex-1 min-w-0">
+          <h2 className="text-title text-ink">Vehicle incidents and ANPR</h2>
+          <p className="text-meta text-ink-3">
+            Rash driving, hit-and-run and plate reads appear here once the ANPR and tracking models are connected. No detections yet.
+          </p>
         </div>
       </Panel>
     </>

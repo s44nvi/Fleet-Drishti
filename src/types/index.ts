@@ -15,3 +15,4 @@ export * from "./traffic";
 export * from "./safety";
 export * from "./infrastructure";
 export * from "./ui";
+export * from "./media";

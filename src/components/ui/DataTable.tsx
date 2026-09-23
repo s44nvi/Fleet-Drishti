@@ -18,13 +18,13 @@ export function DataTable<T>({ columns, rows, getRowKey, getRowHref, emptyLabel 
   const navigate = useNavigate();
 
   if (rows.length === 0) {
-    return <div className="p-space-lg text-center font-body-sm text-body-sm text-ink-muted">{emptyLabel}</div>;
+    return <div className="py-10 text-center text-body text-ink-3">{emptyLabel}</div>;
   }
 
   return (
     <Table>
       <TableHead>
-        <TableRow className="odd:bg-surface-card even:bg-surface-card">
+        <TableRow>
           {columns.map((column) => (
             <TableHeaderCell key={column.key} className={column.align === "right" ? "text-right" : undefined}>
               {column.header}
@@ -39,7 +39,7 @@ export function DataTable<T>({ columns, rows, getRowKey, getRowHref, emptyLabel 
             <TableRow
               key={getRowKey(row)}
               onClick={href ? () => navigate(href) : undefined}
-              className={href ? "cursor-pointer hover:bg-surface-container-high transition-colors" : undefined}
+              className={href ? "cursor-pointer hover:bg-surface-2 transition-colors duration-150" : undefined}
             >
               {columns.map((column) => (
                 <TableCell key={column.key} className={column.align === "right" ? "text-right" : undefined}>

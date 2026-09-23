@@ -1,25 +1,30 @@
 import type { ReactNode } from "react";
+import { Link } from "react-router-dom";
+import { ChevronLeft } from "lucide-react";
 
 interface PageHeaderProps {
-  eyebrow?: string;
-  title: string;
-  description?: string;
+  title: ReactNode;
+  /** One compact context line (place, data time, source badge) — never a paragraph. */
+  context?: ReactNode;
+  /** Parent page for detail screens. */
+  back?: { to: string; label: string };
   actions?: ReactNode;
 }
 
-export function PageHeader({ eyebrow, title, description, actions }: PageHeaderProps) {
+export function PageHeader({ title, context, back, actions }: PageHeaderProps) {
   return (
-    <div className="flex flex-wrap items-start justify-between gap-space-md">
-      <div className="flex flex-col gap-1">
-        {eyebrow && (
-          <span className="font-label-eyebrow text-label-eyebrow text-ink-muted uppercase tracking-widest">
-            {eyebrow}
-          </span>
+    <header className="flex flex-wrap items-end justify-between gap-3">
+      <div className="flex flex-col gap-1 min-w-0">
+        {back && (
+          <Link to={back.to} className="inline-flex items-center gap-0.5 text-meta text-ink-3 hover:text-action w-fit">
+            <ChevronLeft size={14} aria-hidden="true" />
+            {back.label}
+          </Link>
         )}
-        <h1 className="font-headline-lg text-headline-lg text-ink-primary font-bold tracking-tight">{title}</h1>
-        {description && <p className="font-body-md text-body-md text-ink-muted max-w-2xl">{description}</p>}
+        <h1 className="text-display text-ink">{title}</h1>
+        {context && <div className="flex flex-wrap items-center gap-2 text-meta text-ink-3">{context}</div>}
       </div>
-      {actions && <div className="flex items-center gap-space-sm">{actions}</div>}
-    </div>
+      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
+    </header>
   );
 }

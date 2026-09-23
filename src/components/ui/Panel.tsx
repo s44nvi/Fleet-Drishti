@@ -1,51 +1,41 @@
 import type { HTMLAttributes, ReactNode } from "react";
+import type { LucideIcon } from "lucide-react";
 import { cn } from "../../lib/cn";
 
-interface PanelProps extends HTMLAttributes<HTMLDivElement> {
+interface PanelProps extends HTMLAttributes<HTMLElement> {
   children: ReactNode;
+  as?: "div" | "section" | "aside";
 }
 
-// Tier-1 inspection panel: white surface, hairline border, 4-6px radius,
-// zero decorative shadow beyond a faint ambient sm shadow — per DESIGN.md
-// "Surface Tier 1 (Inspection Panels & Modules)".
-export function Panel({ className, children, ...props }: PanelProps) {
+// Panel tier: white, 12px radius, hairline border, faint shadow. Workspaces
+// (map, video) don't use this — they're bare rounded surfaces.
+export function Panel({ className, children, as: Tag = "div", ...props }: PanelProps) {
   return (
-    <div
-      className={cn(
-        "bg-surface-card rounded-lg border border-border-slate shadow-sm",
-        className,
-      )}
-      {...props}
-    >
+    <Tag className={cn("bg-surface rounded-xl border border-line shadow-panel", className)} {...props}>
       {children}
-    </div>
+    </Tag>
   );
 }
 
 interface PanelHeaderProps extends Omit<HTMLAttributes<HTMLDivElement>, "title"> {
   title: ReactNode;
-  icon?: string;
+  icon?: LucideIcon;
   meta?: ReactNode;
   actions?: ReactNode;
+  /** Heading level for document outline; panels under the page h1 default to h2. */
+  level?: 2 | 3;
 }
 
-export function PanelHeader({ title, icon, meta, actions, className, ...props }: PanelHeaderProps) {
+export function PanelHeader({ title, icon: Icon, meta, actions, level = 2, className, ...props }: PanelHeaderProps) {
+  const Heading = level === 2 ? "h2" : "h3";
   return (
-    <div
-      className={cn(
-        "flex flex-wrap items-center justify-between gap-space-xs pb-space-sm border-b border-border-slate",
-        className,
-      )}
-      {...props}
-    >
-      <div className="flex items-center gap-space-sm">
-        <span className="flex items-center gap-1.5 font-title-sm text-title-sm text-ink-primary font-bold">
-          {icon && <span className="material-symbols-outlined text-[18px] text-primary-civic-active">{icon}</span>}
-          {title}
-        </span>
-        {meta}
+    <div className={cn("flex flex-wrap items-center justify-between gap-2", className)} {...props}>
+      <div className="flex items-center gap-2 min-w-0">
+        {Icon && <Icon size={18} strokeWidth={1.75} className="text-ink-2 shrink-0" aria-hidden="true" />}
+        <Heading className="text-title text-ink truncate">{title}</Heading>
+        {meta && <span className="text-meta text-ink-3">{meta}</span>}
       </div>
-      {actions}
+      {actions && <div className="flex items-center gap-2">{actions}</div>}
     </div>
   );
 }

@@ -1,1 +1,0 @@
-export { InfrastructureIssueCard } from "./InfrastructureIssueCard";

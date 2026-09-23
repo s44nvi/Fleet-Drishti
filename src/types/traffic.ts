@@ -13,3 +13,13 @@ export interface TrafficHotspot {
   observingBusCount: number;
   observedAt: string;
 }
+
+// A real major-road polyline near a monitored corridor (OpenStreetMap
+// geometry, see scripts/fetch-corridor-roads.mjs). Carries no traffic
+// values itself — congestion is joined onto it at render time.
+export interface CorridorRoad {
+  id: number;
+  highway: string;
+  name: string;
+  coordinates: [number, number][];
+}

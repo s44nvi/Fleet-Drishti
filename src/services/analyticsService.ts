@@ -1,5 +1,5 @@
 import type { CongestionLevel, KpiTile } from "../types";
-import { mockBuses, mockEvents, mockDetections, mockIssues, mockRoutes, mockTrafficHotspots } from "../data/mock";
+import { mockBuses, mockEvents, mockDetections, mockIssues, mockTrafficHotspots } from "../data/mock";
 import { DETECTION_TAXONOMY_BUCKETS, bucketForSubtype, type TaxonomyBucket } from "../lib/taxonomy";
 import { mockAsync } from "./mockAsync";
 
@@ -9,58 +9,41 @@ export type { TaxonomyBucket };
 // of it is a hardcoded display string. When this swaps to a real backend,
 // it will aggregate over live data the same way.
 //
-// Exactly four KPIs by design (see Command Center spec) — do not add more
-// here without also updating the Command Center's "answer in 5 seconds"
-// rationale.
+// At most four KPIs (Command Center spec). No coverage/health figures: the
+// fixtures carry nothing that would support them.
 function computeCommandCenterKpis(): KpiTile[] {
   const activeBuses = mockBuses.filter((bus) => bus.status === "active");
-  const idleBuses = mockBuses.filter((bus) => bus.status !== "active");
-  const priorityIssues = mockIssues.filter(
-    (issue) => issue.status !== "resolved" && (issue.severity === "critical" || issue.severity === "high"),
-  );
-  const criticalIssues = priorityIssues.filter((issue) => issue.severity === "critical");
-  const totalCorridorKm = mockRoutes.reduce((sum, route) => sum + route.distanceKm, 0);
-  const coveragePercent = Math.round((activeBuses.length / mockBuses.length) * 100);
+  const openIssues = mockIssues.filter((issue) => issue.status !== "resolved");
+  const corroborated = openIssues.filter((issue) => issue.observingBuses.length > 1);
+  const criticalIssues = openIssues.filter((issue) => issue.severity === "critical");
 
   return [
     {
-      id: "connected-buses",
-      label: "Connected Buses",
+      id: "buses-sensing",
+      label: "Buses sensing",
       value: String(activeBuses.length),
-      valueLabel: "Active",
-      badge: "Live",
-      badgeTone: "live",
-      delta: `${idleBuses.length} Idle`,
-      deltaTone: "neutral",
-      caption: "Public Transport Fleet",
+      sub: `of ${mockBuses.length} in fleet`,
     },
     {
-      id: "active-observations",
-      label: "Active Observations",
+      id: "observations",
+      label: "Validated observations",
       value: String(mockEvents.length),
-      badge: "Ingesting",
-      badgeTone: "info",
-      // Raw edge-AI Detections (mockDetections) outnumber validated
-      // Observations (mockEvents) because low-confidence/redundant frames
-      // are filtered before promotion — see data/mock/detections.ts.
-      delta: `${mockDetections.length} Raw Detections`,
-      deltaTone: "neutral",
-      caption: "Validated after confidence filtering",
+      // Raw edge-AI Detections outnumber validated Events because
+      // low-confidence/redundant frames are filtered before promotion.
+      sub: `from ${mockDetections.length} raw detections`,
     },
     {
-      id: "priority-issues",
-      label: "Priority Issues",
-      value: String(priorityIssues.length),
-      delta: criticalIssues.length > 0 ? `${criticalIssues.length} Critical` : "None Critical",
-      deltaTone: criticalIssues.length > 0 ? "negative" : "neutral",
-      caption: "Awaiting Government Action",
+      id: "open-issues",
+      label: "Open issues",
+      value: String(openIssues.length),
+      sub: `${corroborated.length} corroborated by 2+ buses`,
     },
     {
-      id: "fleet-coverage",
-      label: "Fleet Coverage",
-      value: totalCorridorKm.toFixed(1),
-      valueLabel: "km",
-      caption: `${coveragePercent}% Network Coverage`,
+      id: "critical",
+      label: "Critical",
+      value: String(criticalIssues.length),
+      sub: criticalIssues.length > 0 ? "Needs action" : "None open",
+      subTone: criticalIssues.length > 0 ? "alert" : undefined,
     },
   ];
 }
@@ -158,37 +141,60 @@ function computeCityAnalyticsSummary(): KpiTile[] {
   ).toFixed(1);
 
   return [
-    {
-      id: "open-issues",
-      label: "Open Issues",
-      value: String(openIssues.length),
-      badge: "Action Required",
-      badgeTone: "critical",
-      caption: "Awaiting government action",
-    },
-    {
-      id: "resolved-issues",
-      label: "Resolved Issues",
-      value: String(resolvedIssues.length),
-      badge: "Closed",
-      badgeTone: "success",
-      caption: "Confirmed follow-up complete",
-    },
-    {
-      id: "avg-confidence",
-      label: "Avg. Detection Confidence",
-      value: `${avgConfidence}%`,
-      badgeTone: "info",
-      caption: "Across all validated events",
-    },
-    {
-      id: "avg-fusion",
-      label: "Avg. Buses per Issue",
-      value: avgObservationsPerIssue,
-      badgeTone: "info",
-      caption: "Multi-bus observation fusion",
-    },
+    { id: "open-issues", label: "Open issues", value: String(openIssues.length) },
+    { id: "resolved-issues", label: "Resolved issues", value: String(resolvedIssues.length) },
+    { id: "avg-confidence", label: "Avg. detection confidence", value: `${avgConfidence}%`, sub: "Across validated events" },
+    { id: "avg-fusion", label: "Observations per issue", value: avgObservationsPerIssue, sub: "Multi-bus fusion" },
   ];
+}
+
+export interface CorridorTrafficPattern {
+  hotspotId: string;
+  location: string;
+  corridor: string;
+  latitude: number;
+  longitude: number;
+  /** grid[day][hour] congestion index 0..1; day 0 = Monday. */
+  grid: number[][];
+}
+
+// DEMO day × hour congestion pattern per monitored corridor. There is no
+// historical, bus-derived traffic series yet, so this is a deterministic
+// illustrative model — typical weekday AM/PM peaks, softer weekends —
+// scaled by each corridor's real fixture congestionLevel. It is NOT a
+// measurement; every caller must badge it DEMO. Replace with aggregated
+// fleet traffic observations when they exist.
+const PATTERN_BASE: Record<CongestionLevel, number> = { low: 0.4, medium: 0.58, high: 0.74, severe: 0.9 };
+
+function bump(hour: number, centre: number, width: number): number {
+  return Math.exp(-((hour - centre) ** 2) / (2 * width * width));
+}
+
+function computeTrafficPatternDemo(): CorridorTrafficPattern[] {
+  return mockTrafficHotspots.map((hotspot, index) => {
+    const base = PATTERN_BASE[hotspot.congestionLevel];
+    // Small fixed per-corridor offsets so corridors don't peak in lockstep.
+    const shift = (index % 3) * 0.5 - 0.5;
+    const grid = Array.from({ length: 7 }, (_, day) => {
+      const weekend = day >= 5;
+      return Array.from({ length: 24 }, (_, hour) => {
+        const am = bump(hour, 9.5 + shift, 1.5) * (weekend ? 0.45 : 1);
+        const pm = bump(hour, 19 + shift, 1.8) * (weekend ? 0.7 : 1);
+        const midday = bump(hour, 14, 3) * (weekend ? 0.55 : 0.4);
+        const night = hour < 6 ? 0.05 : 0.12;
+        const value = base * Math.max(night, Math.max(am, pm) * 0.95 + midday * 0.35);
+        return Math.min(1, Math.round(value * 100) / 100);
+      });
+    });
+    return {
+      hotspotId: hotspot.hotspotId,
+      location: hotspot.location,
+      corridor: hotspot.corridor,
+      latitude: hotspot.latitude,
+      longitude: hotspot.longitude,
+      grid,
+    };
+  });
 }
 
 export const analyticsService = {
@@ -212,5 +218,10 @@ export const analyticsService = {
   // Explicitly a prototype breakdown — see computeVehicleClassificationDemo's doc comment.
   getVehicleClassificationDemo(): Promise<CorridorVehicleClassification[]> {
     return mockAsync(computeVehicleClassificationDemo());
+  },
+
+  // Explicitly a DEMO pattern — see computeTrafficPatternDemo's doc comment.
+  getTrafficPatternDemo(): Promise<CorridorTrafficPattern[]> {
+    return mockAsync(computeTrafficPatternDemo());
   },
 };

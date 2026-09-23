@@ -1,34 +1,66 @@
-import { PageHeader, Panel } from "../../components/ui";
-import { IssueCard } from "../../components/events";
+import { Bus, ListOrdered } from "lucide-react";
+import { EmptyState, PageHeader, Panel, SeverityBadge, SourceBadge, StatusBadge } from "../../components/ui";
+import { ObservationRow } from "../../components/events";
 import { useAsyncData } from "../../hooks/useAsyncData";
 import { issueService } from "../../services";
+import { computePriorityBreakdown } from "../../lib/priorityScore";
+import { ISSUE_STATUS } from "../../lib/status";
+import { categoryVisual } from "../../lib/visuals";
 
-const SEVERITY_ORDER = { critical: 0, high: 1, medium: 2, low: 3 } as const;
-
+// Action queue: open issues ranked by the explainable demo priority score.
 export function PriorityQueue() {
   const { data: issues, loading } = useAsyncData(() => issueService.listIssues(), []);
-  const sorted = [...(issues ?? [])].sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]);
-  const actionable = sorted.filter((issue) => issue.status !== "resolved");
+  const ranked = (issues ?? [])
+    .filter((issue) => issue.status !== "resolved")
+    .map((issue) => ({ issue, score: computePriorityBreakdown(issue).score }))
+    .sort((a, b) => b.score - a.score);
 
   return (
     <>
       <PageHeader
-        eyebrow="Action"
-        title="Government Action Queue"
-        description="Prioritized queue of detected events awaiting government action."
+        title="Action queue"
+        context={
+          <>
+            <span>Open issues by priority</span>
+            <SourceBadge source="demo" detail="scoring model" />
+          </>
+        }
       />
-      <Panel className="p-space-sm">
+      <Panel className="p-2">
         {loading ? (
-          <div className="p-space-lg text-center font-body-sm text-body-sm text-ink-muted">Loading priority queue…</div>
+          <p className="p-6 text-body text-ink-3">Loading queue…</p>
+        ) : ranked.length === 0 ? (
+          <EmptyState icon={ListOrdered} title="Nothing waiting for action" />
         ) : (
-          <div className="flex flex-col divide-y divide-border-slate">
-            {actionable.map((issue) => (
-              <IssueCard key={issue.issueId} issue={issue} />
+          <ol>
+            {ranked.map(({ issue, score }) => (
+              <li key={issue.issueId}>
+                <ObservationRow
+                  category={issue.subtype}
+                  title={categoryVisual(issue.subtype).label}
+                  meta={
+                    <>
+                      <span className="truncate max-w-[40ch]">{issue.location}</span>
+                      <span className="inline-flex items-center gap-1">
+                        <Bus size={12} aria-hidden="true" />
+                        {issue.observingBuses.length}
+                      </span>
+                      <StatusBadge tone={ISSUE_STATUS[issue.status].tone}>{ISSUE_STATUS[issue.status].label}</StatusBadge>
+                    </>
+                  }
+                  aside={
+                    <>
+                      <span className="text-title text-ink tabular-nums" aria-label={`Priority ${score}`}>
+                        {score}
+                      </span>
+                      <SeverityBadge severity={issue.severity} />
+                    </>
+                  }
+                  href={`/road-issues/${issue.issueId}`}
+                />
+              </li>
             ))}
-            {actionable.length === 0 && (
-              <div className="p-space-lg text-center font-body-sm text-body-sm text-ink-muted">No issues in the queue.</div>
-            )}
-          </div>
+          </ol>
         )}
       </Panel>
     </>

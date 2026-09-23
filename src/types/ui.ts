@@ -1,51 +1,57 @@
 import type { ReactNode } from "react";
-import type { Severity } from "./common";
+import type { LucideIcon } from "lucide-react";
+import type { Tone } from "../lib/visuals";
 
 // View-layer types: shapes the UI needs that aren't backend domain entities.
 
-export type BadgeTone = Severity | "info" | "live" | "success";
+export type BadgeTone = Tone;
 
 export interface KpiTile {
   id: string;
   label: string;
   value: string;
-  /** Short qualifier rendered inline after the value, e.g. "Active" in
-   * "6 Active" or "km" in "59.4 km" — keeps the primary number and its
-   * unit/status on one line without concatenating them into `value`. */
-  valueLabel?: string;
-  badge?: string;
-  badgeTone?: BadgeTone;
-  delta?: string;
-  deltaTone?: "positive" | "negative" | "neutral";
-  caption: string;
+  /** Unit rendered small after the value ("km/h"). */
+  unit?: string;
+  /** One short qualifier under the label ("of 7 in fleet", "2 critical"). */
+  sub?: string;
+  subTone?: Tone;
+  icon?: LucideIcon;
+  tone?: Tone;
 }
+
+export type MapMarkerKind =
+  | "bus-probe"
+  | "critical-distress"
+  | "traffic-chokepoint"
+  | "vulnerable-crossing"
+  | "infrastructure-asset";
 
 export interface MapMarker {
   id: string;
-  kind: "bus-probe" | "critical-distress" | "traffic-chokepoint" | "vulnerable-crossing" | "infrastructure-asset";
+  kind: MapMarkerKind;
   label: string;
+  /** Second tooltip line (location, time, bus). */
+  detail?: string;
   latitude: number;
   longitude: number;
   href?: string;
-  /** Real congestion severity (from TrafficHotspot.congestionLevel, "severe"
-   * relabeled "critical" for display) — only meaningful on a
-   * "traffic-chokepoint" marker, where GISMap uses it to shade the pin as a
-   * lightweight congestion heatmap instead of one flat color. */
+  /** Fixture subtype/objectClass/assetType — picks the marker glyph via
+   * lib/visuals.ts. Falls back to the kind's default glyph. */
+  category?: string;
+  /** Real severity/congestion reading — shades the marker instead of the
+   * kind's default tone. */
   intensity?: "low" | "medium" | "high" | "critical";
-}
-
-export interface PipelineStepData {
-  id: string;
-  order: number;
-  label: string;
-  status: "complete" | "pending";
-  detail: string;
+  /** Explicit tone override (e.g. a bus's online/idle status). */
+  tone?: Tone;
+  /** Observed within the last 5 minutes of the dataset anchor — draws a
+   * single recency ring. */
+  recent?: boolean;
 }
 
 export interface NavLeafItem {
   label: string;
   path: string;
-  icon: string;
+  icon: LucideIcon;
 }
 
 export interface DataTableColumn<T> {

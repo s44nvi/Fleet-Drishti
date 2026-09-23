@@ -1,34 +1,33 @@
-import { Link, useParams } from "react-router-dom";
-import { PageHeader, Panel, PanelHeader, DataTable, StatusBadge } from "../../components/ui";
-import { TelemetryRow } from "../../components/telemetry";
+import { useParams } from "react-router-dom";
+import { Bus as BusIcon, Route as RouteIcon, Ruler } from "lucide-react";
+import { DataTable, EmptyState, MetaStrip, PageHeader, Panel, PanelHeader, SourceBadge, StatusBadge } from "../../components/ui";
+import { GISMap } from "../../components/gis";
 import { useAsyncData } from "../../hooks/useAsyncData";
 import { routeService } from "../../services";
-import type { Bus, DataTableColumn, BadgeTone } from "../../types";
-
-const BUS_STATUS_TONE: Record<Bus["status"], BadgeTone> = {
-  active: "success",
-  idle: "info",
-  offline: "critical",
-  maintenance: "high",
-};
+import { busMarker } from "../../lib/mapMarkers";
+import { BUS_STATUS } from "../../lib/status";
+import type { Bus, DataTableColumn } from "../../types";
 
 const busColumns: DataTableColumn<Bus>[] = [
-  { key: "busId", header: "Bus", render: (bus) => <span className="font-label-code text-label-code font-semibold">{bus.label}</span> },
-  { key: "status", header: "Status", render: (bus) => <StatusBadge tone={BUS_STATUS_TONE[bus.status]}>{bus.status}</StatusBadge> },
+  { key: "busId", header: "Bus", render: (bus) => <span className="text-item">{bus.label}</span> },
+  { key: "status", header: "Status", render: (bus) => <StatusBadge tone={BUS_STATUS[bus.status].tone}>{BUS_STATUS[bus.status].label}</StatusBadge> },
   { key: "speed", header: "Speed", render: (bus) => `${bus.speedKph} km/h`, align: "right" },
-  { key: "lastSeen", header: "Last Seen", render: (bus) => new Date(bus.lastSeenAt).toLocaleTimeString("en-IN"), align: "right" },
+  { key: "lastSeen", header: "Last seen", render: (bus) => new Date(bus.lastSeenAt).toLocaleTimeString("en-IN"), align: "right" },
 ];
 
 export function RouteDetail() {
   const { routeId } = useParams<{ routeId: string }>();
   const { data: route, loading } = useAsyncData(() => routeService.getRouteById(routeId ?? ""), [routeId]);
   const { data: buses } = useAsyncData(() => routeService.listBusesForRoute(routeId ?? ""), [routeId]);
+  const { data: networkRouteLines } = useAsyncData(() => routeService.listNetworkRouteLines(), []);
 
   if (!loading && !route) {
     return (
       <>
-        <PageHeader eyebrow="Fleet" title="Route Intelligence" description="Deep-dive detail view for a single transit route." />
-        <Panel className="p-space-lg text-center font-body-sm text-body-sm text-ink-muted">No route found for ID "{routeId}".</Panel>
+        <PageHeader title="Route not found" back={{ to: "/routes", label: "Routes" }} />
+        <Panel>
+          <EmptyState icon={RouteIcon} title={`No route with ID "${routeId}"`} />
+        </Panel>
       </>
     );
   }
@@ -36,47 +35,42 @@ export function RouteDetail() {
   return (
     <>
       <PageHeader
-        eyebrow="Fleet"
-        title={route ? route.name : "Route Intelligence"}
-        description={route ? `${route.origin} → ${route.destination}` : "Loading route detail…"}
+        back={{ to: "/routes", label: "Routes" }}
+        title={route?.name ?? "Loading…"}
+        context={route && <span>{route.origin} → {route.destination}</span>}
       />
 
       {route && (
-        <section className="grid grid-cols-1 xl:grid-cols-12 gap-space-md w-full items-start">
-          <div className="xl:col-span-4">
-            <Panel className="p-space-sm flex flex-col gap-space-xs">
-              <PanelHeader title="Route Telemetry" icon="alt_route" />
-              <TelemetryRow label="Corridor" value={route.corridor} />
-              <TelemetryRow label="Distance" value={`${route.distanceKm} km`} />
-              <TelemetryRow label="Assigned Buses" value={route.assignedBusIds.length} />
-              <TelemetryRow label="Active Buses" value={route.activeBusCount} />
-              {route.networkSource === "GTFS_BEST" && (
-                <TelemetryRow label="Network Data" value="Public BEST route network" />
-              )}
-            </Panel>
-          </div>
-
-          <div className="xl:col-span-8">
-            <Panel className="overflow-hidden">
-              <div className="p-space-sm">
-                <PanelHeader title="Buses on This Route" icon="directions_bus" />
-              </div>
-              <DataTable
-                columns={busColumns}
-                rows={buses ?? []}
-                getRowKey={(bus) => bus.busId}
-                getRowHref={(bus) => `/fleet/${bus.busId}`}
-                emptyLabel="No buses currently assigned."
-              />
-            </Panel>
-          </div>
-        </section>
-      )}
-
-      {route && (
-        <Link to="/routes" className="font-label-code text-label-code text-ink-secondary hover:text-ink-primary transition-colors w-fit">
-          ← Back to Routes
-        </Link>
+        <>
+          <GISMap
+            className="h-[420px]"
+            ariaLabel={`${route.name} on the BEST network`}
+            markers={(buses ?? []).map(busMarker)}
+            routeLines={networkRouteLines ?? []}
+            highlightRoute={route.routeId.replace("BEST-", "")}
+            showLayerPanel={false}
+          />
+          <Panel className="p-4">
+            <MetaStrip
+              items={[
+                { label: "Distance", value: `${route.distanceKm} km`, icon: Ruler },
+                { label: "Assigned buses", value: route.assignedBusIds.length, icon: BusIcon },
+                { label: "Active buses", value: route.activeBusCount, icon: BusIcon },
+                { label: "Network data", value: route.networkSource === "GTFS_BEST" ? "BEST GTFS (community feed)" : "Simulated", icon: RouteIcon },
+              ]}
+            />
+          </Panel>
+          <Panel className="overflow-hidden">
+            <PanelHeader className="px-4 pt-4 pb-3" title="Buses on this route" icon={BusIcon} actions={<SourceBadge source="simulated" />} />
+            <DataTable
+              columns={busColumns}
+              rows={buses ?? []}
+              getRowKey={(bus) => bus.busId}
+              getRowHref={(bus) => `/fleet/${bus.busId}`}
+              emptyLabel="No buses assigned."
+            />
+          </Panel>
+        </>
       )}
     </>
   );

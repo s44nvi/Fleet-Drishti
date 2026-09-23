@@ -7,3 +7,5 @@ export { routeService } from "./routeService";
 export { eventService } from "./eventService";
 export { issueService } from "./issueService";
 export { analyticsService } from "./analyticsService";
+export { mediaService } from "./mediaService";
+export { trafficService } from "./trafficService";
