@@ -1,0 +1,32 @@
+{
+  "agency": "Brihanmumbai Electric Supply and Transport",
+  "datasetName": "mumbai-gtfs community feed — BEST slice",
+  "repository": "https://github.com/croyla/mumbai-gtfs",
+  "mobilityDatabaseFeedUrl": "https://mobilitydatabase.org/feeds/gtfs/mdb-3138",
+  "license": "MIT-0",
+  "filesUsed": [
+    "agency.txt",
+    "feed_info.txt",
+    "calendar.txt",
+    "routes.txt",
+    "stops.txt",
+    "trips.txt",
+    "stop_times.txt"
+  ],
+  "retrievedAt": "2026-09-13T08:13:25.968Z",
+  "serviceStartDate": "2026-08-19",
+  "serviceEndDate": "2027-02-15",
+  "isCurrent": true,
+  "hasShapes": false,
+  "hasApproximateGeometry": true,
+  "notes": "Community-maintained GTFS feed for Mumbai-region bus operators (github.com/croyla/mumbai-gtfs, MIT-0 licensed; also listed on the Mobility Database as mdb-3138). This is NOT an official publication by BEST or any transit authority, and it carries no live vehicle-location data — every bus position shown in this app is Fleet Drishti's own simulation, never real BEST GPS. The source feed covers four operators (BEST, KDMT, TMT, VVMT); this project's current scope is Mumbai + BEST only, so everything here has been filtered to agency_id=BEST. The feed has no shapes.txt, so there is no authoritative route-line geometry — mumbaiBestRouteLines.json instead derives one approximate LineString per route+direction by connecting that direction's real stops in their recorded stop_sequence order (grouped by trip from trips.txt/stop_times.txt), same approach as before, never a fabricated or hand-drawn shape.",
+  "totalRoutesInFeed": 495,
+  "totalStopsInFeed": 4824,
+  "totalTripsInFeed": 91129,
+  "totalRouteLinesDerived": 885,
+  "curatedRouteIds": [
+    "9-2",
+    "83-2",
+    "50-2"
+  ]
+}

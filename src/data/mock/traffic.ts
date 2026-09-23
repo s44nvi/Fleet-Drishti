@@ -1,0 +1,48 @@
+import type { TrafficHotspot } from "../../types";
+
+export const mockTrafficHotspots: TrafficHotspot[] = [
+  {
+    hotspotId: "HOT-1",
+    location: "Goregaon Flyover",
+    corridor: "Western Express Highway",
+    latitude: 19.1663,
+    longitude: 72.8526,
+    congestionLevel: "severe",
+    averageSpeedKph: 9,
+    observingBusCount: 12,
+    observedAt: "2026-09-12T10:41:05+05:30",
+  },
+  {
+    hotspotId: "HOT-2",
+    location: "BKC / Kurla",
+    corridor: "BKC Connector",
+    latitude: 19.0662,
+    longitude: 72.8686,
+    congestionLevel: "high",
+    averageSpeedKph: 14,
+    observingBusCount: 8,
+    observedAt: "2026-09-12T10:38:00+05:30",
+  },
+  {
+    hotspotId: "HOT-3",
+    location: "Sion Circle",
+    corridor: "LBS Marg",
+    latitude: 19.0433,
+    longitude: 72.8622,
+    congestionLevel: "medium",
+    averageSpeedKph: 18,
+    observingBusCount: 5,
+    observedAt: "2026-09-12T10:36:12+05:30",
+  },
+  {
+    hotspotId: "HOT-4",
+    location: "Chembur Naka",
+    corridor: "Eastern Express Highway",
+    latitude: 19.0522,
+    longitude: 72.9005,
+    congestionLevel: "high",
+    averageSpeedKph: 11,
+    observingBusCount: 6,
+    observedAt: "2026-09-12T10:33:47+05:30",
+  },
+];

@@ -1,0 +1,1 @@
+export { BusDetail } from "./BusDetail";

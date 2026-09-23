@@ -1,0 +1,103 @@
+import type { Issue } from "../../types";
+
+// Issues are the fused, multi-bus-correlated output of the Event stream —
+// the unit that reaches the priority queue for government action. Each
+// Issue below is deliberately built up from the matching Events in
+// events.ts (see relatedEventIds) so the Bus -> Detection -> Event -> Issue
+// chain is traceable end to end.
+export const mockIssues: Issue[] = [
+  {
+    issueId: "RD-10482",
+    type: "road-defect",
+    subtype: "pothole",
+    severity: "critical",
+    confidence: 91,
+    latitude: 19.1197,
+    longitude: 72.8468,
+    location: "S.V. Road, Andheri East (Near Chakala Metro)",
+    firstSeen: "2026-09-12T10:40:02+05:30",
+    lastSeen: "2026-09-12T10:42:18+05:30",
+    observationCount: 3,
+    observingBuses: ["BUS-101", "BUS-312", "BUS-418"],
+    relatedEventIds: ["EVT-10482-A", "EVT-10482-B", "EVT-10482-C"],
+    evidence: [
+      {
+        evidenceId: "EV-10482-1",
+        eventId: "EVT-10482-B",
+        busId: "BUS-312",
+        cameraId: "CAM-312-FRONT",
+        capturedAt: "2026-09-12T10:41:15+05:30",
+        thumbnailUrl: "mock://evidence/EVT-10482-B/1",
+        type: "image",
+        piiRedacted: true,
+      },
+      {
+        evidenceId: "EV-10482-2",
+        eventId: "EVT-10482-C",
+        busId: "BUS-418",
+        cameraId: "CAM-418-FRONT",
+        capturedAt: "2026-09-12T10:42:18+05:30",
+        thumbnailUrl: "mock://evidence/EVT-10482-C/1",
+        type: "image",
+        piiRedacted: true,
+      },
+    ],
+    status: "action-required",
+  },
+  {
+    issueId: "SF-302",
+    type: "safety",
+    subtype: "pedestrian-conflict",
+    severity: "high",
+    confidence: 89,
+    latitude: 19.0433,
+    longitude: 72.8622,
+    location: "Sion Circle - LBS Marg Jn",
+    firstSeen: "2026-09-12T10:39:42+05:30",
+    lastSeen: "2026-09-12T10:44:03+05:30",
+    observationCount: 2,
+    observingBuses: ["BUS-22", "BUS-64"],
+    relatedEventIds: ["EVT-PED-1", "EVT-PED-2"],
+    evidence: [
+      {
+        evidenceId: "EV-302-1",
+        eventId: "EVT-PED-1",
+        busId: "BUS-22",
+        cameraId: "CAM-22-FRONT",
+        capturedAt: "2026-09-12T10:39:42+05:30",
+        thumbnailUrl: "mock://evidence/EVT-PED-1/1",
+        type: "video-clip",
+        piiRedacted: true,
+      },
+    ],
+    status: "under-review",
+  },
+  {
+    issueId: "TB-2201",
+    type: "traffic-blockage",
+    subtype: "lane-blockage",
+    severity: "high",
+    confidence: 84,
+    latitude: 19.0178,
+    longitude: 72.848,
+    location: "Dadar TT Circle",
+    firstSeen: "2026-09-12T10:36:40+05:30",
+    lastSeen: "2026-09-12T10:36:40+05:30",
+    observationCount: 1,
+    observingBuses: ["BUS-108"],
+    relatedEventIds: ["EVT-LANE-1"],
+    evidence: [
+      {
+        evidenceId: "EV-2201-1",
+        eventId: "EVT-LANE-1",
+        busId: "BUS-108",
+        cameraId: "CAM-108-FRONT",
+        capturedAt: "2026-09-12T10:36:40+05:30",
+        thumbnailUrl: "mock://evidence/EVT-LANE-1/1",
+        type: "image",
+        piiRedacted: true,
+      },
+    ],
+    status: "action-required",
+  },
+];

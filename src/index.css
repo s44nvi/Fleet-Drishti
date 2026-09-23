@@ -1,0 +1,196 @@
+@import url("https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap");
+@import "tailwindcss";
+
+/*
+  Design tokens sourced from stitch_citylens_urban_intelligence_platform/civic_urban_command/DESIGN.md
+  "Civic Realism and Operational Density" — do not add gradients, glass, dark mode, or new colors here.
+*/
+@theme {
+  /* Material-3-derived surface/ink scale (from Stitch shell) */
+  --color-surface: #faf8ff;
+  --color-surface-dim: #d2d9f4;
+  --color-surface-bright: #faf8ff;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #f2f3ff;
+  --color-surface-container: #eaedff;
+  --color-surface-container-high: #e2e7ff;
+  --color-surface-container-highest: #dae2fd;
+  --color-on-surface: #131b2e;
+  --color-on-surface-variant: #3f493f;
+  --color-inverse-surface: #283044;
+  --color-inverse-on-surface: #eef0ff;
+  --color-outline: #6f7a6e;
+  --color-outline-variant: #becabc;
+  --color-surface-tint: #006d30;
+  --color-primary: #00652c;
+  --color-on-primary: #ffffff;
+  --color-primary-container: #15803d;
+  --color-on-primary-container: #d3ffd5;
+  --color-inverse-primary: #79db8d;
+  --color-secondary: #805600;
+  --color-on-secondary: #ffffff;
+  --color-secondary-container: #feb63c;
+  --color-on-secondary-container: #6e4900;
+  --color-tertiary: #1248d3;
+  --color-on-tertiary: #ffffff;
+  --color-tertiary-container: #3963ec;
+  --color-on-tertiary-container: #f3f2ff;
+  --color-error: #ba1a1a;
+  --color-on-error: #ffffff;
+  --color-error-container: #ffdad6;
+  --color-on-error-container: #93000a;
+  --color-primary-fixed: #95f8a7;
+  --color-primary-fixed-dim: #79db8d;
+  --color-on-primary-fixed: #00210a;
+  --color-on-primary-fixed-variant: #005323;
+  --color-secondary-fixed: #ffddb0;
+  --color-secondary-fixed-dim: #ffba46;
+  --color-on-secondary-fixed: #281800;
+  --color-on-secondary-fixed-variant: #614000;
+  --color-tertiary-fixed: #dce1ff;
+  --color-tertiary-fixed-dim: #b7c4ff;
+  --color-on-tertiary-fixed: #001551;
+  --color-on-tertiary-fixed-variant: #0039b5;
+  --color-background: #faf8ff;
+  --color-on-background: #131b2e;
+  --color-surface-variant: #dae2fd;
+
+  /* Civic operational palette (primary system used on screens) */
+  --color-surface-concrete: #faf9f6;
+  --color-surface-panel: #f0efea;
+  --color-surface-card: #ffffff;
+  --color-border-slate: #e2e0d8;
+  --color-border-grid: #cbd5e1;
+  --color-primary-civic-deep: #166534;
+  --color-primary-civic-active: #15803d;
+  --color-transit-ochre: #ca8a04;
+  --color-transit-warning: #d97706;
+  --color-gis-vector-blue: #2563eb;
+  --color-gis-route-blue: #1d4ed8;
+  --color-ink-primary: #0f172a;
+  --color-ink-secondary: #334155;
+  --color-ink-muted: #64748b;
+  --color-signal-alert: #dc2626;
+
+  /* Typography — a single confident, institutional sans-serif throughout.
+  --font-mono is intentionally aliased to the same sans stack (never a
+  monospace/typewriter face): hierarchy comes from weight/size/spacing/line
+  height, not from switching typefaces for "code-like" labels. */
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+
+  --font-size-display-hero: 48px;
+  --font-size-display-hero--line-height: 56px;
+  --font-size-display-hero--letter-spacing: -0.025em;
+  --font-size-display-hero--font-weight: 800;
+
+  --font-size-display-hero-mobile: 32px;
+  --font-size-display-hero-mobile--line-height: 40px;
+  --font-size-display-hero-mobile--letter-spacing: -0.02em;
+  --font-size-display-hero-mobile--font-weight: 800;
+
+  --font-size-headline-xl: 36px;
+  --font-size-headline-xl--line-height: 44px;
+  --font-size-headline-xl--letter-spacing: -0.02em;
+  --font-size-headline-xl--font-weight: 700;
+
+  --font-size-headline-xl-mobile: 26px;
+  --font-size-headline-xl-mobile--line-height: 34px;
+  --font-size-headline-xl-mobile--letter-spacing: -0.01em;
+  --font-size-headline-xl-mobile--font-weight: 700;
+
+  --font-size-headline-lg: 24px;
+  --font-size-headline-lg--line-height: 32px;
+  --font-size-headline-lg--letter-spacing: -0.015em;
+  --font-size-headline-lg--font-weight: 700;
+
+  --font-size-headline-md: 18px;
+  --font-size-headline-md--line-height: 26px;
+  --font-size-headline-md--letter-spacing: -0.01em;
+  --font-size-headline-md--font-weight: 600;
+
+  --font-size-title-sm: 15px;
+  --font-size-title-sm--line-height: 22px;
+  --font-size-title-sm--letter-spacing: 0em;
+  --font-size-title-sm--font-weight: 600;
+
+  --font-size-body-lg: 15px;
+  --font-size-body-lg--line-height: 24px;
+  --font-size-body-lg--letter-spacing: 0em;
+  --font-size-body-lg--font-weight: 400;
+
+  --font-size-body-md: 13px;
+  --font-size-body-md--line-height: 20px;
+  --font-size-body-md--letter-spacing: 0em;
+  --font-size-body-md--font-weight: 400;
+
+  --font-size-body-sm: 12px;
+  --font-size-body-sm--line-height: 18px;
+  --font-size-body-sm--letter-spacing: 0.005em;
+  --font-size-body-sm--font-weight: 400;
+
+  --font-size-label-code: 11px;
+  --font-size-label-code--line-height: 16px;
+  --font-size-label-code--letter-spacing: 0.04em;
+  --font-size-label-code--font-weight: 500;
+
+  --font-size-label-eyebrow: 10px;
+  --font-size-label-eyebrow--line-height: 14px;
+  --font-size-label-eyebrow--letter-spacing: 0.1em;
+  --font-size-label-eyebrow--font-weight: 700;
+
+  /* Radii — strict 4-6px functional scale, pills reserved for live badges */
+  --radius-sm: 0.125rem;
+  --radius-DEFAULT: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+  --radius-full: 9999px;
+
+  /* Spacing */
+  --spacing-gutter: 1rem;
+  --spacing-gutter-mobile: 0.5rem;
+  --spacing-margin: 1.5rem;
+  --spacing-margin-mobile: 0.75rem;
+  --spacing-space-xs: 0.25rem;
+  --spacing-space-sm: 0.5rem;
+  --spacing-space-md: 0.75rem;
+  --spacing-space-lg: 1.25rem;
+  --spacing-space-xl: 2rem;
+}
+
+@layer base {
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    overscroll-behavior: none;
+    background-color: var(--color-surface-concrete);
+    color: var(--color-ink-primary);
+    font-family: var(--font-sans);
+  }
+
+  ::-webkit-scrollbar {
+    display: none;
+  }
+
+  .material-symbols-outlined {
+    font-family: "Material Symbols Outlined";
+    font-weight: normal;
+    font-style: normal;
+    font-size: 20px;
+    line-height: 1;
+    letter-spacing: normal;
+    text-transform: none;
+    display: inline-block;
+    white-space: nowrap;
+    word-wrap: normal;
+    direction: ltr;
+    -webkit-font-feature-settings: "liga";
+    -webkit-font-smoothing: antialiased;
+  }
+}

@@ -1,0 +1,1 @@
+export { IssueIntelligence } from "./IssueIntelligence";

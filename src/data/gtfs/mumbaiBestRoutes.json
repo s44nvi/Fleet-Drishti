@@ -1,0 +1,59 @@
+[
+  {
+    "gtfsRouteId": "9-2",
+    "shortName": "9",
+    "longName": "Antop Hill Bus Station ⇆ Colaba Bus Station",
+    "origin": {
+      "stopId": "",
+      "name": "Antop Hill Bus Station",
+      "latitude": 19.026336,
+      "longitude": 72.866128
+    },
+    "destination": {
+      "stopId": "",
+      "name": "Colaba Bus Station",
+      "latitude": 18.912649,
+      "longitude": 72.823191
+    },
+    "approxDistanceKm": 19,
+    "scheduledTripCount": 81
+  },
+  {
+    "gtfsRouteId": "83-2",
+    "shortName": "83",
+    "longName": "Santacruz Depot ⇆ Colaba Bus Station",
+    "origin": {
+      "stopId": "",
+      "name": "Santacruz Depot",
+      "latitude": 19.091149,
+      "longitude": 72.838513
+    },
+    "destination": {
+      "stopId": "",
+      "name": "Colaba Bus Station",
+      "latitude": 18.912649,
+      "longitude": 72.823191
+    },
+    "approxDistanceKm": 27.7,
+    "scheduledTripCount": 187
+  },
+  {
+    "gtfsRouteId": "50-2",
+    "shortName": "50",
+    "longName": "Worli Depot ⇆ Ferry Wharf",
+    "origin": {
+      "stopId": "",
+      "name": "Worli Depot",
+      "latitude": 18.957025,
+      "longitude": 72.849513
+    },
+    "destination": {
+      "stopId": "",
+      "name": "Ferry Wharf",
+      "latitude": 19.013944,
+      "longitude": 72.819888
+    },
+    "approxDistanceKm": 12.7,
+    "scheduledTripCount": 96
+  }
+]
