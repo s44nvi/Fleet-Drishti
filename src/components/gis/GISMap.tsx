@@ -51,6 +51,14 @@ export interface MapCallout {
   side?: "left" | "right";
 }
 
+export interface RasterOverlay {
+  url: string;
+  /** Corners: top-left, top-right, bottom-right, bottom-left, [lng, lat]. */
+  coordinates: [[number, number], [number, number], [number, number], [number, number]];
+  label: string;
+  opacity?: number;
+}
+
 export interface HeatPoint {
   longitude: number;
   latitude: number;
@@ -84,6 +92,9 @@ interface GISMapProps {
   /** Road segments coloured by a 0..1 congestion weight (Traffic page).
    * Toggles together with the heatmap layer. */
   congestionSegments?: CongestionSegment[];
+  /** A georeferenced image drawn under the route network (e.g. the Traffic
+   * page's congestion heat raster). Toggles with the heatmap layer. */
+  rasterOverlay?: RasterOverlay | null;
   /** Floating cards pinned to map locations (e.g. the busiest corridors). */
   callouts?: MapCallout[];
   /** Start with the BEST route layer hidden (it stays in the layer panel). */
@@ -110,6 +121,8 @@ const NETWORK_ROUTES_LAYER_ID = "fd-network-routes-layer";
 const NETWORK_ROUTES_HIGHLIGHT_LAYER_ID = "fd-network-routes-highlight";
 const HEAT_SOURCE_ID = "fd-heat";
 const HEAT_LAYER_ID = "fd-heat-layer";
+const RASTER_SOURCE_ID = "fd-raster";
+const RASTER_LAYER_ID = "fd-raster-layer";
 const CONGESTION_SOURCE_ID = "fd-congestion";
 const CONGESTION_CASING_LAYER_ID = "fd-congestion-casing";
 const CONGESTION_LAYER_ID = "fd-congestion-layer";
@@ -226,6 +239,32 @@ function heatToGeoJSON(points: HeatPoint[]): GeoJSON.FeatureCollection {
       properties: { weight: p.weight },
     })),
   };
+}
+
+// Add, update or remove the image overlay. It sits just under the route
+// network (or the congestion lines) so they and the markers stay on top.
+function syncRaster(map: MapLibreMap, overlay: RasterOverlay | null | undefined) {
+  const source = map.getSource(RASTER_SOURCE_ID) as maplibregl.ImageSource | undefined;
+  if (!overlay?.url) {
+    if (map.getLayer(RASTER_LAYER_ID)) map.removeLayer(RASTER_LAYER_ID);
+    if (source) map.removeSource(RASTER_SOURCE_ID);
+    return;
+  }
+  if (source) {
+    source.updateImage({ url: overlay.url, coordinates: overlay.coordinates });
+    return;
+  }
+  const before = [NETWORK_ROUTES_LAYER_ID, CONGESTION_CASING_LAYER_ID].find((id) => map.getLayer(id));
+  map.addSource(RASTER_SOURCE_ID, { type: "image", url: overlay.url, coordinates: overlay.coordinates });
+  map.addLayer(
+    {
+      id: RASTER_LAYER_ID,
+      type: "raster",
+      source: RASTER_SOURCE_ID,
+      paint: { "raster-opacity": overlay.opacity ?? 0.9, "raster-fade-duration": 0, "raster-resampling": "linear" },
+    },
+    before,
+  );
 }
 
 // Tooltip / popup bodies are built with DOM text nodes, never innerHTML, so
@@ -347,6 +386,7 @@ export function GISMap({
   drawerOpen = false,
   heatmap,
   congestionSegments,
+  rasterOverlay,
   callouts,
   initialShowRoutes = true,
   focus = null,
@@ -375,6 +415,7 @@ export function GISMap({
   const heatRef = useRef(heatmap?.points ?? []);
   const heatRampRef = useRef(heatmap?.ramp ?? "risk");
   const segmentsRef = useRef<CongestionSegment[]>(congestionSegments ?? []);
+  const rasterRef = useRef(rasterOverlay);
   const calloutMarkersRef = useRef<Map<string, { marker: MapLibreMarker; el: HTMLDivElement }>>(new Map());
   const selectedRouteIdRef = useRef<string | null>(null);
   const highlightRouteRef = useRef(highlightRoute);
@@ -385,6 +426,7 @@ export function GISMap({
   heatRef.current = heatmap?.points ?? [];
   heatRampRef.current = heatmap?.ramp ?? "risk";
   segmentsRef.current = congestionSegments ?? [];
+  rasterRef.current = rasterOverlay;
   highlightRouteRef.current = highlightRoute;
 
   const [styleReady, setStyleReady] = useState(0);
@@ -517,17 +559,20 @@ export function GISMap({
           paint: { "line-color": NETWORK_HIGHLIGHT_COLOR, "line-width": 4.5, "line-opacity": 0.95 },
         });
       }
+      syncRaster(map, rasterRef.current);
       if (!map.getSource(CONGESTION_SOURCE_ID)) {
         map.addSource(CONGESTION_SOURCE_ID, { type: "geojson", data: segmentsToGeoJSON(segmentsRef.current) });
         // `zoom` may only drive a top-level interpolate, so the per-feature
         // emphasis factor goes inside each stop.
-        const k: maplibregl.ExpressionSpecification = ["case", ["==", ["get", "emphasis"], 1], 1.7, 1];
+        // Thin per-carriageway lines that only fade in once zoomed in; at
+        // city scale the heat raster carries the picture.
+        const k: maplibregl.ExpressionSpecification = ["case", ["==", ["get", "emphasis"], 1], 1.6, 1];
         const widthAt = (extra: number): maplibregl.ExpressionSpecification => [
           "interpolate", ["linear"], ["zoom"],
-          10, ["+", ["*", 2.2, k], extra],
-          12, ["+", ["*", 3.6, k], extra],
-          14, ["+", ["*", 6, k], extra],
-          16, ["+", ["*", 9, k], extra],
+          11, ["+", ["*", 0.6, k], extra],
+          13, ["+", ["*", 1.6, k], extra],
+          15, ["+", ["*", 3, k], extra],
+          17, ["+", ["*", 5, k], extra],
         ];
         const width = widthAt(0);
         map.addLayer({
@@ -535,7 +580,11 @@ export function GISMap({
           type: "line",
           source: CONGESTION_SOURCE_ID,
           layout: { "line-cap": "round", "line-join": "round" },
-          paint: { "line-color": "#ffffff", "line-width": widthAt(2), "line-opacity": 0.75 },
+          paint: {
+            "line-color": "#ffffff",
+            "line-width": widthAt(1.5),
+            "line-opacity": ["interpolate", ["linear"], ["zoom"], 12, 0, 13.5, 0.6],
+          },
         });
         map.addLayer({
           id: CONGESTION_LAYER_ID,
@@ -544,7 +593,7 @@ export function GISMap({
           layout: { "line-cap": "round", "line-join": "round", "line-sort-key": ["get", "weight"] },
           paint: {
             "line-width": width,
-            "line-opacity": 0.95,
+            "line-opacity": ["interpolate", ["linear"], ["zoom"], 11.5, 0, 13.5, 0.9],
             "line-color": ["interpolate", ["linear"], ["get", "weight"], 0, "#2fae63", 0.35, "#d6c93a", 0.55, "#f0922b", 0.75, "#e13c2c", 1, "#b91c1c"],
           },
         });
@@ -647,6 +696,11 @@ export function GISMap({
   }, [congestionSegments, styleReady]);
   useEffect(() => {
     const map = mapRef.current;
+    if (map && styleReady) syncRaster(map, rasterOverlay);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rasterOverlay?.url, styleReady]);
+  useEffect(() => {
+    const map = mapRef.current;
     if (!map?.getLayer(HEAT_LAYER_ID)) return;
     map.setPaintProperty(HEAT_LAYER_ID, "heatmap-color", heatmap?.ramp === "congestion" ? CONGESTION_HEAT_COLOR : RISK_HEAT_COLOR);
   }, [heatmap?.ramp, styleReady]);
@@ -689,9 +743,10 @@ export function GISMap({
     set(NETWORK_ROUTES_HIGHLIGHT_LAYER_ID, showRoutes || Boolean(highlightRoute));
     set(NETWORK_STOPS_LAYER_ID, showStops);
     set(HEAT_LAYER_ID, showHeat && Boolean(heatmap));
+    set(RASTER_LAYER_ID, showHeat && Boolean(rasterOverlay));
     set(CONGESTION_CASING_LAYER_ID, showHeat && Boolean(congestionSegments?.length));
     set(CONGESTION_LAYER_ID, showHeat && Boolean(congestionSegments?.length));
-  }, [showRoutes, showStops, showHeat, heatmap, congestionSegments, highlightRoute, styleReady]);
+  }, [showRoutes, showStops, showHeat, heatmap, rasterOverlay, congestionSegments, highlightRoute, styleReady]);
 
   // Page-driven route highlight: filter + fit to the route.
   useEffect(() => {
@@ -846,7 +901,7 @@ export function GISMap({
         ),
       )}
 
-      {showLayerPanel && (kindsPresent.length > 0 || hasNetwork || heatmap) && (
+      {showLayerPanel && (kindsPresent.length > 0 || hasNetwork || heatmap || rasterOverlay) && (
         <div className="absolute top-3 left-3 z-10 w-[212px] max-w-[calc(100%-4.5rem)] rounded-[10px] bg-surface shadow-float">
           <button
             type="button"
@@ -860,11 +915,11 @@ export function GISMap({
           </button>
           {panelOpen && (
             <div className="border-t border-line px-2 py-1.5 flex flex-col max-h-[60vh] overflow-y-auto">
-              {heatmap && (
+              {(heatmap || rasterOverlay) && (
                 <LayerToggle
                   checked={showHeat}
                   onChange={() => setShowHeat((v) => !v)}
-                  label={heatmap.label}
+                  label={heatmap?.label ?? rasterOverlay?.label ?? ""}
                   swatch={<Flame size={15} className="text-watch-ink" />}
                 />
               )}

@@ -1,19 +1,18 @@
 {
-  "dataset": "OpenStreetMap major roads around monitored traffic corridors",
+  "dataset": "OpenStreetMap major roads across Greater Mumbai",
   "license": "ODbL 1.0 — © OpenStreetMap contributors",
   "endpoints": [
     "https://overpass.kumi.systems/api/interpreter",
     "https://overpass-api.de/api/interpreter"
   ],
-  "radiusMetres": 3500,
-  "highwayFilter": "^(motorway|motorway_link|trunk|trunk_link|primary|secondary)$",
-  "corridors": [
-    "HOT-1",
-    "HOT-2",
-    "HOT-3",
-    "HOT-4"
+  "bbox": [
+    18.89,
+    72.78,
+    19.28,
+    73
   ],
-  "wayCount": 1932,
-  "retrievedAt": "2026-09-23T20:50:48.904Z",
+  "highwayFilter": "^(motorway|motorway_link|trunk|trunk_link|primary|secondary)$",
+  "wayCount": 5467,
+  "retrievedAt": "2026-09-24T03:54:16.275Z",
   "note": "Geometry only. Congestion drawn on it is DEMO data until real bus-derived observations exist."
 }

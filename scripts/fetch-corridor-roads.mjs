@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 // One-time (re-run manually when needed) extraction of real major-road
-// geometry around each monitored traffic corridor, from OpenStreetMap via the
-// Overpass API, into a static JSON asset the Traffic page ships. Not run at
-// request time or in the browser. Re-run with:
+// geometry across Mumbai (island city + western and eastern suburbs), from
+// OpenStreetMap via the Overpass API, into a static JSON asset the Traffic
+// page ships. Not run at request time or in the browser. Re-run with:
 //   node scripts/fetch-corridor-roads.mjs
+// or, to reuse a saved Overpass response:
+//   node scripts/fetch-corridor-roads.mjs path/to/overpass.json
 //
 // Only the *geometry* is real (OSM, ODbL — attribution is already on every
 // map). The congestion drawn on these roads on the Traffic page is the DEMO
-// day × hour pattern until real bus-derived traffic observations exist.
+// day × hour model until real bus-derived traffic observations exist.
 
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -16,18 +18,20 @@ import { dirname, join } from "node:path";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = join(__dirname, "..", "src", "data", "traffic");
 const ENDPOINTS = ["https://overpass.kumi.systems/api/interpreter", "https://overpass-api.de/api/interpreter"];
-const RADIUS_M = 3500;
+// south, west, north, east
+const BBOX = [18.89, 72.78, 19.28, 73.0];
 const HIGHWAY = "^(motorway|motorway_link|trunk|trunk_link|primary|secondary)$";
-const SIMPLIFY_M = 6;
+const SIMPLIFY_M = 10;
 
-// Corridor locations come straight from the traffic fixture.
-const fixture = readFileSync(join(__dirname, "..", "src", "data", "mock", "traffic.ts"), "utf8");
-const corridors = [...fixture.matchAll(/hotspotId: "([^"]+)"[\s\S]*?latitude: ([\d.]+),\s*longitude: ([\d.]+)/g)].map((m) => ({
-  hotspotId: m[1],
-  lat: Number(m[2]),
-  lng: Number(m[3]),
-}));
-if (corridors.length === 0) throw new Error("No corridors parsed from src/data/mock/traffic.ts");
+// Keep Greater Mumbai; drop Navi Mumbai, Thane and Mira-Bhayandar, which the
+// bounding box clips into.
+function inMumbai([lng, lat]) {
+  if (lat > 19.265) return false;
+  if (lng > 72.975) return false;
+  if (lat > 19.19 && lng > 72.95) return false;
+  if (lat < 19.16 && lng > 72.965) return false;
+  return true;
+}
 
 function metres(a, b) {
   const kx = 111_320 * Math.cos((a[1] * Math.PI) / 180);
@@ -62,8 +66,8 @@ function simplify(points, tol) {
   return points.filter((_, i) => keep[i]);
 }
 
-async function fetchCorridor(c) {
-  const query = `[out:json][timeout:90];way(around:${RADIUS_M},${c.lat},${c.lng})["highway"~"${HIGHWAY}"];out geom;`;
+async function fetchWays() {
+  const query = `[out:json][timeout:120];way(${BBOX.join(",")})["highway"~"${HIGHWAY}"];out geom;`;
   let lastError;
   for (let attempt = 0; attempt < 6; attempt++) {
     const endpoint = ENDPOINTS[attempt % ENDPOINTS.length];
@@ -74,7 +78,7 @@ async function fetchCorridor(c) {
         body: new URLSearchParams({ data: query }),
       });
       if (res.ok) return (await res.json()).elements;
-      lastError = new Error(`Overpass ${res.status} from ${endpoint} for ${c.hotspotId}`);
+      lastError = new Error(`Overpass ${res.status} from ${endpoint}`);
     } catch (error) {
       lastError = error;
     }
@@ -83,33 +87,34 @@ async function fetchCorridor(c) {
   throw lastError;
 }
 
-const ways = new Map();
-for (const c of corridors) {
-  const elements = await fetchCorridor(c);
-  for (const el of elements) {
-    if (el.type !== "way" || !el.geometry || ways.has(el.id)) continue;
-    const coords = simplify(
-      el.geometry.map((g) => [g.lon, g.lat]),
-      SIMPLIFY_M,
-    ).map(([lng, lat]) => [Math.round(lng * 1e5) / 1e5, Math.round(lat * 1e5) / 1e5]);
-    ways.set(el.id, { id: el.id, highway: el.tags?.highway ?? "", name: el.tags?.name ?? "", coordinates: coords });
-  }
-  console.log(`${c.hotspotId}: ${elements.length} ways`);
+const cached = process.argv[2];
+const elements = cached ? JSON.parse(readFileSync(cached, "utf8")).elements : await fetchWays();
+
+const ways = [];
+for (const el of elements) {
+  if (el.type !== "way" || !el.geometry) continue;
+  const raw = el.geometry.map((g) => [g.lon, g.lat]);
+  if (!inMumbai(raw[Math.floor(raw.length / 2)])) continue;
+  const coords = simplify(raw, SIMPLIFY_M).map(([lng, lat]) => [Math.round(lng * 1e5) / 1e5, Math.round(lat * 1e5) / 1e5]);
+  if (coords.length < 2) continue;
+  const road = { id: el.id, highway: el.tags?.highway ?? "", name: el.tags?.name ?? "", coordinates: coords };
+  if (el.tags?.ref) road.ref = el.tags.ref;
+  if (el.tags?.oneway === "yes") road.oneway = true;
+  ways.push(road);
 }
 
 mkdirSync(OUT_DIR, { recursive: true });
-writeFileSync(join(OUT_DIR, "corridorRoads.json"), JSON.stringify([...ways.values()]));
+writeFileSync(join(OUT_DIR, "mumbaiRoads.json"), JSON.stringify(ways));
 writeFileSync(
   join(OUT_DIR, "source.json"),
   JSON.stringify(
     {
-      dataset: "OpenStreetMap major roads around monitored traffic corridors",
+      dataset: "OpenStreetMap major roads across Greater Mumbai",
       license: "ODbL 1.0 — © OpenStreetMap contributors",
       endpoints: ENDPOINTS,
-      radiusMetres: RADIUS_M,
+      bbox: BBOX,
       highwayFilter: HIGHWAY,
-      corridors: corridors.map((c) => c.hotspotId),
-      wayCount: ways.size,
+      wayCount: ways.length,
       retrievedAt: new Date().toISOString(),
       note: "Geometry only. Congestion drawn on it is DEMO data until real bus-derived observations exist.",
     },
@@ -117,4 +122,4 @@ writeFileSync(
     2,
   ),
 );
-console.log(`Wrote ${ways.size} ways`);
+console.log(`Wrote ${ways.length} ways`);

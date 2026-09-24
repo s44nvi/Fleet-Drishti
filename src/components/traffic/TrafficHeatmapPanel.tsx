@@ -67,7 +67,7 @@ export function TrafficHeatmapPanel({
       <div className="flex items-start justify-between gap-2">
         <div>
           <h2 className="text-title text-ink">Traffic heatmap</h2>
-          <p className="text-meta text-ink-3">Weekly congestion pattern across corridors</p>
+          <p className="text-meta text-ink-3">Weekly congestion pattern · Mumbai corridors</p>
         </div>
         <SourceBadge source="demo" />
       </div>

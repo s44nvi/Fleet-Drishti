@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Bus, Gauge, MapPin, TrafficCone, TrendingUp } from "lucide-react";
 import { KpiStrip } from "../../components/telemetry";
 import { PageHeader, Panel, SourceBadge } from "../../components/ui";
-import { GISMap, type MapCallout } from "../../components/gis";
+import { GISMap, type MapCallout, type RasterOverlay } from "../../components/gis";
 import {
   CongestionHotspots,
   CongestionLegend,
@@ -10,6 +10,7 @@ import {
   RouteAnalysis,
   TrafficHeatmapPanel,
   TrafficObservations,
+  type HotspotItem,
   type RouteRow,
   type TrafficObservation,
 } from "../../components/traffic";
@@ -17,7 +18,23 @@ import { useAsyncData } from "../../hooks/useAsyncData";
 import { eventService, fleetService, mediaService, routeService, trafficService } from "../../services";
 import { CONGESTION_DISPLAY_LABEL } from "../../lib/congestion";
 import { CONGESTED_THRESHOLD, DAY_LABELS, congestionColor, congestionWord, hourLabel, mondayIndex } from "../../lib/congestionIndex";
-import { buildRoadField, congestionGlow, congestionRoads, estimateRoute, type CorridorPoint } from "../../lib/trafficModel";
+import {
+  RASTER_COORDINATES,
+  buildTrafficField,
+  congestionRoads,
+  estimateRoute,
+  renderHeatRaster,
+  roadWeights,
+  type CorridorPoint,
+} from "../../lib/trafficModel";
+import {
+  TRAFFIC_SEGMENTS,
+  corridorGrid,
+  directionLabel,
+  networkIndex,
+  segmentStretch,
+} from "../../lib/trafficProfiles";
+import { TRAFFIC_CORRIDORS } from "../../data/traffic/corridors";
 import { busMarker } from "../../lib/mapMarkers";
 import { datasetAnchor } from "../../lib/pulse";
 import { categoryVisual, TONE_CLASSES } from "../../lib/visuals";
@@ -25,8 +42,13 @@ import { cn } from "../../lib/cn";
 import type { CongestionLevel, KpiTile, MapMarker, Severity } from "../../types";
 
 const LEVEL_SEVERITY: Record<CongestionLevel, Severity> = { low: "low", medium: "medium", high: "high", severe: "critical" };
+const HOTSPOT_COUNT = 6;
+// Two callouts closer than this (degrees of latitude) would overlap.
+const CALLOUT_MIN_LAT_GAP = 0.06;
+// Whole of Greater Mumbai, Colaba to Dahisar.
+const CITY_VIEW = { latitude: 19.085, longitude: 72.88, zoom: 10.6, key: "mumbai" };
 
-// Compact tab labels for the long highway names.
+// Compact labels for the long highway names.
 function shortCorridor(name: string) {
   return name.replace("Western Express Highway", "WEH").replace("Eastern Express Highway", "EEH");
 }
@@ -36,20 +58,24 @@ function signedPct(value: number) {
   return `${n > 0 ? "+" : ""}${n}%`;
 }
 
-// Traffic Intelligence — LOCATION × DAY × TIME → CONGESTION.
-// Map: real OpenStreetMap roads around each monitored corridor, coloured by
-// the congestion index for the chosen day/hour (green → red), with bus
-// markers and callouts on the busiest corridors. Right: time/day analysis
-// and the hotspot ranking. Below: weekly patterns, route estimates and the
-// latest fleet observations.
-// Data: the day × hour pattern and everything derived from it is DEMO; the
-// corridor readings, buses and observations are fixture data (SIMULATED).
-// All of it flows through trafficService, so real bus-derived observations
-// can replace it without changing this page.
+const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
+
+// Traffic Intelligence — WHERE is traffic building up across Mumbai at this
+// DAY + TIME?
+// Map: a soft city-wide heat layer over real OpenStreetMap roads, coloured by
+// the congestion of each corridor stretch (per direction of travel) and of
+// the busy areas around them, with bus markers and a few callouts on top.
+// Right: the time/day analysis and the hotspot ranking for the chosen slot.
+// Below: weekly patterns, route estimates and the latest fleet observations.
+// Data: the traffic profiles are a deterministic DEMO model patterned on
+// recurring Mumbai congestion; buses and observations are fixture data
+// (SIMULATED). All of it flows through trafficService, so bus-derived
+// observations (camera/sensor + GPS + timestamp → per-segment aggregation)
+// can replace the model without changing this page.
 export function Traffic() {
-  const { data: patterns } = useAsyncData(() => trafficService.listCorridorPatterns(), []);
+  const { data: profiles } = useAsyncData(() => trafficService.listTrafficProfiles(), []);
   const { data: readings } = useAsyncData(() => trafficService.listCorridorReadings(), []);
-  const { data: roads } = useAsyncData(() => trafficService.listCorridorRoads(), []);
+  const { data: roads } = useAsyncData(() => trafficService.listMumbaiRoads(), []);
   const { data: buses } = useAsyncData(() => fleetService.listBuses(), []);
   const { data: events } = useAsyncData(() => eventService.listEvents(), []);
   const { data: clips } = useAsyncData(() => mediaService.listDetectionClips(), []);
@@ -73,36 +99,61 @@ export function Traffic() {
     setHour(new Date(anchor).getHours());
   }, [readings, anchor]);
 
-  const allPatterns = useMemo(() => patterns ?? [], [patterns]);
-  const corridors = useMemo<CorridorPoint[]>(
-    () => allPatterns.map((p) => ({ hotspotId: p.hotspotId, corridor: p.corridor, latitude: p.latitude, longitude: p.longitude })),
-    [allPatterns],
+  const field = useMemo(() => (roads ? buildTrafficField(roads) : null), [roads]);
+  const snap = profiles?.[day]?.[hour] ?? null;
+  const weights = useMemo(() => (field && snap ? roadWeights(field, snap) : null), [field, snap]);
+
+  const rasterOverlay = useMemo<RasterOverlay | null>(() => {
+    if (!field || !weights) return null;
+    return { url: renderHeatRaster(field, weights), coordinates: RASTER_COORDINATES, label: "Traffic heatmap (demo)", opacity: 0.88 };
+  }, [field, weights]);
+  const lines = useMemo(() => (field && weights ? congestionRoads(field, weights, selectedId) : []), [field, weights, selectedId]);
+
+  // Only stretches that exist on the map take part in rankings and counts.
+  const segments = useMemo(
+    () => (field ? TRAFFIC_SEGMENTS.filter((s) => field.mappedSegments.has(s.id)) : []),
+    [field],
   );
-  const grids = useMemo(() => allPatterns.map((p) => p.grid), [allPatterns]);
-  const field = useMemo(() => (roads && corridors.length ? buildRoadField(roads, corridors) : null), [roads, corridors]);
 
-  const values = useMemo(() => grids.map((g) => g[day][hour]), [grids, day, hour]);
-  const prevValues = useMemo(() => grids.map((g) => g[day][(hour + 23) % 24]), [grids, day, hour]);
-  const usualValues = useMemo(() => grids.map((g) => g.reduce((s, row) => s + row[hour], 0) / 7), [grids, hour]);
+  const cityIndex = snap ? networkIndex(snap) : 0;
+  const prevSnap = profiles?.[day]?.[(hour + 23) % 24] ?? null;
+  const prevCityIndex = prevSnap ? networkIndex(prevSnap) : 0;
+  const byHour = useMemo(() => (profiles ? profiles[day].map(networkIndex) : []), [profiles, day]);
+  const byDay = useMemo(() => (profiles ? profiles.map((d) => networkIndex(d[hour])) : []), [profiles, hour]);
 
-  const focusId = selectedId ?? readings?.[0]?.hotspotId ?? null;
-  const focusIndex = corridors.findIndex((c) => c.hotspotId === focusId);
-
-  const segments = useMemo(() => (field ? congestionRoads(field, values, focusIndex) : []), [field, values, focusIndex]);
-  const glow = useMemo(() => (field ? congestionGlow(field, values) : []), [field, values]);
-
-  const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
-  const byHour = useMemo(() => Array.from({ length: 24 }, (_, h) => mean(grids.map((g) => g[day][h]))), [grids, day]);
-  const byDay = useMemo(() => Array.from({ length: 7 }, (_, d) => mean(grids.map((g) => g[d][hour]))), [grids, hour]);
-
-  const cityIndex = mean(values);
-  const prevCityIndex = mean(prevValues);
-  const congested = values.filter((v) => v >= CONGESTED_THRESHOLD).length;
-  const prevCongested = prevValues.filter((v) => v >= CONGESTED_THRESHOLD).length;
-  const allReadings = useMemo(() => readings ?? [], [readings]);
-  const avgSpeed = allReadings.length ? mean(allReadings.map((r) => r.averageSpeedKph)) : 0;
-  const activeBuses = (buses ?? []).filter((b) => b.status === "active").length;
   const when = `${DAY_LABELS[day]} ${hourLabel(hour)}`;
+
+  // The worst stretch per corridor at this slot, ranked.
+  const hotspots = useMemo<HotspotItem[]>(() => {
+    if (!profiles || !snap) return [];
+    const best = new Map<string, HotspotItem>();
+    for (const seg of segments) {
+      const t = snap.segments[seg.id];
+      const usual = mean(profiles.map((d) => d[hour].segments[seg.id][t.direction]));
+      const value = t[t.direction];
+      const item: HotspotItem = {
+        id: seg.id,
+        corridor: seg.corridor,
+        stretch: segmentStretch(seg, t.direction),
+        direction: directionLabel(seg, t.direction),
+        level: t.level,
+        index: t.intensity,
+        speedKph: t.speedKph,
+        vsUsualPct: usual > 0 ? ((value - usual) / usual) * 100 : 0,
+      };
+      const current = best.get(seg.corridorId);
+      if (!current || item.index > current.index) best.set(seg.corridorId, item);
+    }
+    return [...best.values()].sort((a, b) => b.index - a.index).slice(0, HOTSPOT_COUNT);
+  }, [profiles, snap, segments, hour]);
+
+  const segmentValues = useMemo(() => (snap ? segments.map((s) => snap.segments[s.id].intensity) : []), [snap, segments]);
+  const prevSegmentValues = useMemo(() => (prevSnap ? segments.map((s) => prevSnap.segments[s.id].intensity) : []), [prevSnap, segments]);
+  const congested = segmentValues.filter((v) => v >= CONGESTED_THRESHOLD).length;
+  const prevCongested = prevSegmentValues.filter((v) => v >= CONGESTED_THRESHOLD).length;
+  const avgSpeed = snap && segments.length ? mean(segments.map((s) => snap.segments[s.id].speedKph)) : 0;
+  const prevAvgSpeed = prevSnap && segments.length ? mean(segments.map((s) => prevSnap.segments[s.id].speedKph)) : 0;
+  const activeBuses = (buses ?? []).filter((b) => b.status === "active").length;
 
   const indexDelta = prevCityIndex > 0 ? ((cityIndex - prevCityIndex) / prevCityIndex) * 100 : 0;
   const kpis: KpiTile[] = [
@@ -118,22 +169,23 @@ export function Traffic() {
     },
     {
       id: "congested",
-      label: "Congested corridors · demo",
+      label: "Congested stretches · demo",
       value: String(congested),
-      unit: `of ${values.length}`,
+      unit: `of ${segments.length}`,
       sub: `${congested - prevCongested >= 0 ? "+" : ""}${congested - prevCongested} vs previous hour`,
       subTone: congested > prevCongested ? "alert" : undefined,
       icon: TrafficCone,
-      tone: congested > 0 ? "alert" : "ok",
+      tone: congested > segments.length / 3 ? "alert" : congested > 0 ? "watch" : "ok",
     },
     {
       id: "speed",
-      label: "Avg. bus speed · simulated",
+      label: "Avg. corridor speed · demo",
       value: avgSpeed.toFixed(0),
       unit: "km/h",
-      sub: `Across ${allReadings.length} corridors · latest reading`,
+      sub: `${signedPct(prevAvgSpeed > 0 ? ((avgSpeed - prevAvgSpeed) / prevAvgSpeed) * 100 : 0)} vs previous hour`,
+      subTone: avgSpeed < prevAvgSpeed ? "alert" : "ok",
       icon: TrendingUp,
-      tone: avgSpeed < 15 ? "alert" : avgSpeed < 25 ? "watch" : "ok",
+      tone: avgSpeed < 20 ? "alert" : avgSpeed < 30 ? "watch" : "ok",
     },
     {
       id: "buses",
@@ -146,67 +198,86 @@ export function Traffic() {
     },
   ];
 
-  // Map: corridor markers coloured by the current index + the bus fleet.
+  const segmentById = useMemo(() => new Map(TRAFFIC_SEGMENTS.map((s) => [s.id, s])), []);
+
+  // Map: the bus fleet plus a small marker on each ranked hotspot.
   const markers = useMemo<MapMarker[]>(() => {
-    const corridorMarkers: MapMarker[] = allPatterns.map((p, i) => {
-      const word = congestionWord(values[i] ?? 0);
+    const hotspotMarkers: MapMarker[] = hotspots.slice(0, 5).map((h) => {
+      const seg = segmentById.get(h.id)!;
       return {
-        id: p.hotspotId,
+        id: h.id,
         kind: "traffic-chokepoint",
         category: "congestion",
-        label: `${p.corridor} · ${p.location}`,
-        detail: `${word.label} · index ${Math.round((values[i] ?? 0) * 100)} · demo`,
-        latitude: p.latitude,
-        longitude: p.longitude,
-        tone: word.tone,
+        label: `${h.corridor} · ${h.stretch}`,
+        detail: `${h.direction} · ${congestionWord(h.index).label} · ~${h.speedKph} km/h · demo`,
+        latitude: seg.mid[1],
+        longitude: seg.mid[0],
+        tone: congestionWord(h.index).tone,
       };
     });
-    return [...(buses ?? []).map(busMarker), ...corridorMarkers];
-  }, [allPatterns, values, buses]);
+    return [...(buses ?? []).map(busMarker), ...hotspotMarkers];
+  }, [hotspots, buses, segmentById]);
 
-  // Callouts on the two most congested corridors (plus the selected one).
+  // Callouts on the two worst stretches that are far enough apart not to
+  // overlap (the selected one replaces #2). Cards open eastwards, over the
+  // harbour, clear of the layer panel on the west.
   const callouts = useMemo<MapCallout[]>(() => {
-    const ranked = allPatterns.map((p, i) => ({ p, i })).sort((a, b) => values[b.i] - values[a.i]);
-    const chosen = ranked.slice(0, 2);
-    const selected = ranked.find((r) => r.p.hotspotId === selectedId);
-    if (selected && !chosen.includes(selected)) chosen[1] = selected;
-    const midLng = mean(allPatterns.map((p) => p.longitude));
-    return chosen.map(({ p, i }) => ({
-      key: p.hotspotId,
-      latitude: p.latitude,
-      longitude: p.longitude,
-      side: p.longitude > midLng ? "left" : "right",
-      content: (
-        <CorridorCallout
-          corridor={p.corridor}
-          location={p.location}
-          value={values[i]}
-          vsUsual={usualValues[i] > 0 ? ((values[i] - usualValues[i]) / usualValues[i]) * 100 : 0}
-          selected={p.hotspotId === focusId}
-        />
-      ),
-    }));
-  }, [allPatterns, values, usualValues, selectedId, focusId]);
+    const [first, ...rest] = hotspots;
+    if (!first) return [];
+    const firstMid = segmentById.get(first.id)!.mid;
+    const apart = (h: HotspotItem) => Math.abs(segmentById.get(h.id)!.mid[1] - firstMid[1]) > CALLOUT_MIN_LAT_GAP;
+    const chosen = [first, rest.find(apart)].filter((h): h is HotspotItem => Boolean(h));
+    const selected = hotspots.find((h) => h.id === selectedId);
+    if (selected && !chosen.includes(selected)) chosen[chosen.length > 1 ? 1 : chosen.length] = selected;
+    return chosen.map((h) => {
+      const seg = segmentById.get(h.id)!;
+      return {
+        key: h.id,
+        latitude: seg.mid[1],
+        longitude: seg.mid[0],
+        side: "right",
+        content: <CorridorCallout item={h} selected={h.id === selectedId} />,
+      };
+    });
+  }, [hotspots, selectedId, segmentById]);
 
-  const gridPattern = allPatterns.find((p) => p.hotspotId === (patternId ?? focusId)) ?? allPatterns[0];
+  const patternCorridorId =
+    patternId ?? (selectedId ? segmentById.get(selectedId)?.corridorId : undefined) ?? segmentById.get(hotspots[0]?.id ?? "")?.corridorId ?? "weh";
+  const patternCorridor = TRAFFIC_CORRIDORS.find((c) => c.id === patternCorridorId) ?? TRAFFIC_CORRIDORS[0];
+  const patternGrid = useMemo(() => (profiles ? corridorGrid(profiles, patternCorridor.id) : null), [profiles, patternCorridor.id]);
 
+  // Route estimates feel each mapped stretch's weekly pattern.
+  const segmentPoints = useMemo<CorridorPoint[]>(
+    () => segments.map((s) => ({ id: s.id, longitude: s.mid[0], latitude: s.mid[1] })),
+    [segments],
+  );
+  const segmentGrids = useMemo(
+    () =>
+      profiles
+        ? segments.map((s) => profiles.map((d) => d.map((snapshot) => (snapshot.segments[s.id].forward + snapshot.segments[s.id].reverse) / 2)))
+        : [],
+    [profiles, segments],
+  );
   const routeRows = useMemo<RouteRow[]>(
     () =>
-      (routes ?? []).map((r) => {
-        const short = r.routeId.replace("BEST-", "");
-        const line = networkRouteLines?.find((l) => l.shortName === short);
-        return {
-          routeId: r.routeId,
-          name: r.name,
-          from: r.origin.replace(/ Bus Station| Depot/g, ""),
-          to: r.destination.replace(/ Bus Station| Depot/g, ""),
-          distanceKm: r.distanceKm,
-          estimate: estimateRoute(line, r.distanceKm, corridors, grids, day, hour),
-        };
-      }),
-    [routes, networkRouteLines, corridors, grids, day, hour],
+      segmentGrids.length
+        ? (routes ?? []).map((r) => {
+            const short = r.routeId.replace("BEST-", "");
+            const line = networkRouteLines?.find((l) => l.shortName === short);
+            return {
+              routeId: r.routeId,
+              name: r.name,
+              from: r.origin.replace(/ Bus Station| Depot/g, ""),
+              to: r.destination.replace(/ Bus Station| Depot/g, ""),
+              distanceKm: r.distanceKm,
+              estimate: estimateRoute(line, r.distanceKm, segmentPoints, segmentGrids, day, hour),
+            };
+          })
+        : [],
+    [routes, networkRouteLines, segmentPoints, segmentGrids, day, hour],
   );
 
+  const allReadings = useMemo(() => readings ?? [], [readings]);
   const observations = useMemo<TrafficObservation[]>(() => {
     const fromEvents: TrafficObservation[] = (events ?? [])
       .filter((e) => e.eventType === "traffic")
@@ -235,11 +306,13 @@ export function Traffic() {
 
   const setHourStable = useCallback((h: number) => setHour(h), []);
 
-  function selectCorridor(id: string | null) {
-    if (id && !allPatterns.some((p) => p.hotspotId === id)) return; // bus markers: tooltip only
+  function selectSegment(id: string | null) {
+    if (id && !segmentById.has(id)) return; // bus markers: tooltip only
     setSelectedId(id);
-    if (id) setPatternId(id);
+    if (id) setPatternId(segmentById.get(id)?.corridorId ?? null);
   }
+
+  const cityWord = congestionWord(cityIndex);
 
   return (
     <>
@@ -252,7 +325,7 @@ export function Traffic() {
               Mumbai
             </span>
             <span aria-hidden="true">·</span>
-            <span>Congestion by location, day and hour</span>
+            <span>Where traffic builds up, by day and hour</span>
             <SourceBadge source="demo" />
           </>
         }
@@ -260,31 +333,34 @@ export function Traffic() {
 
       <KpiStrip tiles={kpis} />
 
-      <section className="grid grid-cols-1 xl:grid-cols-12 gap-4 xl:h-[740px]">
+      <section className="grid grid-cols-1 xl:grid-cols-12 gap-4 xl:h-[760px]">
         <GISMap
-          className="xl:col-span-8 h-[520px] sm:h-[600px] xl:h-full"
-          ariaLabel={`Traffic congestion map, ${when}`}
+          className="xl:col-span-8 h-[560px] sm:h-[640px] xl:h-full"
+          ariaLabel={`Mumbai traffic heatmap, ${when}`}
           markers={markers}
           routeLines={networkRouteLines ?? []}
           initialShowRoutes={false}
-          heatmap={{ points: glow, label: "Traffic heatmap (demo)", ramp: "congestion" }}
-          congestionSegments={segments}
+          rasterOverlay={rasterOverlay}
+          congestionSegments={lines}
           selectedId={selectedId}
           hoveredId={hoveredId}
-          onSelect={selectCorridor}
-          fitToMarkers
+          onSelect={selectSegment}
+          flyToSelection={false}
+          focus={CITY_VIEW}
           callouts={callouts}
           legend={
             <div className="flex flex-col gap-1.5">
               <CongestionLegend compact />
-              <p className="text-micro text-ink-3">Roads © OpenStreetMap · congestion demo</p>
+              <p className="text-micro text-ink-3">Roads © OpenStreetMap · congestion: demo model</p>
             </div>
           }
           overlay={
-            <div className="absolute bottom-9 left-3 z-10 flex items-center gap-2 rounded-lg bg-surface/95 px-3 py-2 shadow-float">
+            <div className="absolute bottom-9 left-3 z-10 flex items-center gap-2.5 rounded-lg bg-surface/95 px-3 py-2 shadow-float">
               <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: congestionColor(cityIndex) }} aria-hidden="true" />
-              <span className="text-item text-ink tabular-nums">{when}</span>
-              <span className={cn("text-micro", TONE_CLASSES[congestionWord(cityIndex).tone].ink)}>{congestionWord(cityIndex).label}</span>
+              <span className="text-title text-ink tabular-nums">{when}</span>
+              <span className={cn("text-micro", TONE_CLASSES[cityWord.tone].ink)}>
+                {cityWord.label} · index {Math.round(cityIndex * 100)}
+              </span>
               <SourceBadge source="demo" />
             </div>
           }
@@ -303,10 +379,11 @@ export function Traffic() {
             byDay={byDay}
           />
           <CongestionHotspots
-            className="flex-1 min-h-[240px]"
-            readings={allReadings}
-            selectedId={focusId}
-            onSelect={selectCorridor}
+            className="flex-1 min-h-[260px]"
+            items={hotspots}
+            when={when}
+            selectedId={selectedId}
+            onSelect={(id) => selectSegment(id === selectedId ? null : id)}
             onHover={setHoveredId}
           />
         </div>
@@ -322,29 +399,29 @@ export function Traffic() {
             <SourceBadge source="demo" />
           </div>
           <div role="tablist" aria-label="Corridor" className="flex flex-wrap gap-1 rounded-lg bg-surface-2 p-0.5 w-fit">
-            {allPatterns.map((p) => {
-              const active = p.hotspotId === gridPattern?.hotspotId;
+            {TRAFFIC_CORRIDORS.map((c) => {
+              const active = c.id === patternCorridor.id;
               return (
                 <button
-                  key={p.hotspotId}
+                  key={c.id}
                   type="button"
                   role="tab"
                   aria-selected={active}
-                  onClick={() => setPatternId(p.hotspotId)}
-                  title={p.corridor}
+                  onClick={() => setPatternId(c.id)}
+                  title={c.name}
                   className={cn(
                     "h-7 px-2.5 rounded-md text-meta transition-colors duration-150",
                     active ? "bg-surface text-action font-semibold shadow-panel ring-1 ring-action/30" : "text-ink-3 hover:text-ink",
                   )}
                 >
-                  {shortCorridor(p.corridor)}
+                  {c.short}
                 </button>
               );
             })}
           </div>
-          {gridPattern && (
+          {patternGrid && (
             <HeatGrid
-              grid={gridPattern.grid}
+              grid={patternGrid}
               day={day}
               hour={hour}
               onSelect={(d, h) => {
@@ -352,7 +429,7 @@ export function Traffic() {
                 setDay(d);
                 setHour(h);
               }}
-              label={`Congestion by day and hour on ${gridPattern.corridor}`}
+              label={`Congestion by day and hour on ${patternCorridor.name}`}
             />
           )}
         </Panel>
@@ -364,41 +441,29 @@ export function Traffic() {
   );
 }
 
-function CorridorCallout({
-  corridor,
-  location,
-  value,
-  vsUsual,
-  selected,
-}: {
-  corridor: string;
-  location: string;
-  value: number;
-  vsUsual: number;
-  selected: boolean;
-}) {
-  const word = congestionWord(value);
+function CorridorCallout({ item, selected }: { item: HotspotItem; selected: boolean }) {
+  const word = congestionWord(item.index);
   return (
-    <div className={cn("w-[228px] rounded-xl bg-surface px-3 py-2.5 shadow-float", selected && "ring-2 ring-action/50")}>
+    <div className={cn("w-[220px] rounded-xl bg-surface px-3 py-2.5 shadow-float", selected && "ring-2 ring-action/50")}>
       <div className="flex items-center gap-2">
         <span
           className="h-7 w-7 shrink-0 inline-flex items-center justify-center rounded-lg text-white"
-          style={{ backgroundColor: congestionColor(value) }}
+          style={{ backgroundColor: congestionColor(item.index) }}
           aria-hidden="true"
         >
           <TrafficCone size={15} strokeWidth={2} />
         </span>
         <span className="min-w-0">
-          <span className="block text-item text-ink leading-tight">{corridor}</span>
-          <span className="block text-meta text-ink-3 truncate">{location}</span>
+          <span className="block text-item text-ink leading-tight truncate">{shortCorridor(item.corridor)}</span>
+          <span className="block text-meta text-ink-3 truncate">{item.stretch}</span>
         </span>
       </div>
       <p className={cn("mt-1.5 text-micro", TONE_CLASSES[word.tone].ink)}>
-        {word.label} congestion · index {Math.round(value * 100)}
+        {word.label} · {item.direction} · ~{item.speedKph} km/h
       </p>
       <p className="text-meta text-ink-3 tabular-nums">
-        <span className={vsUsual > 0 ? "text-alert-ink font-semibold" : "text-ok-ink font-semibold"}>{signedPct(vsUsual)}</span> vs usual ·
-        demo
+        <span className={item.vsUsualPct > 0 ? "text-alert-ink font-semibold" : "text-ok-ink font-semibold"}>{signedPct(item.vsUsualPct)}</span>{" "}
+        vs usual for this hour · demo
       </p>
     </div>
   );
