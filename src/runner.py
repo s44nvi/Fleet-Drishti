@@ -14,6 +14,7 @@ from event_formatter import (
 )
 from backend_client import send_event, send_evidence
 from dedup import Deduplicator
+from motion_gate import MotionGate
 from pedestrian_safety import PedestrianHazardMonitor
 from evidence import save_detection_frame
 
@@ -23,6 +24,9 @@ VIDEO_PATH = "sample.mp4"
 
 @dataclass
 class PipelineStats:
+    frames_sampled: int = 0
+    frames_processed: int = 0
+    frames_skipped: int = 0
     detections_seen: int = 0
     events_sent: int = 0
     events_queued: int = 0
@@ -101,6 +105,7 @@ def main():
 
     density_monitor = DensityMonitor()
     hazard_monitor = PedestrianHazardMonitor()
+    motion_gate = MotionGate()
 
     stats = PipelineStats()
 
@@ -113,7 +118,16 @@ def main():
         timestamp_seconds = item["timestamp_seconds"]
         frame = item["frame"]
 
-        gps = gps_provider.get_location(timestamp_seconds)
+        stats.frames_sampled += 1
+
+        # Static scene -> nothing new for the detectors to see
+        if not motion_gate.should_process(frame, timestamp_seconds):
+            stats.frames_skipped += 1
+            continue
+
+        stats.frames_processed += 1
+
+        gps =gps_provider.get_location(timestamp_seconds)
 
         event_timestamp = (
             video_start_time
@@ -200,7 +214,19 @@ def main():
                 stats=stats,
             )
 
+    skipped_percent = (
+        100.0 * stats.frames_skipped / stats.frames_sampled
+        if stats.frames_sampled
+        else 0.0
+    )
+
     print("\nFinished.")
+    print(f"Frames sampled: {stats.frames_sampled}")
+    print(f"Frames processed: {stats.frames_processed}")
+    print(
+        f"Frames skipped by motion gate: {stats.frames_skipped} "
+        f"({skipped_percent:.1f}%)"
+    )
     print(f"Detections seen: {stats.detections_seen}")
     print(f"Events sent: {stats.events_sent}")
     print(f"Events queued: {stats.events_queued}")

@@ -12,6 +12,27 @@ BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000")
 # Video processing
 FRAME_SAMPLE_RATE = int(os.getenv("FRAME_SAMPLE_RATE", "5"))
 
+# Motion gate
+# Cheap frame differencing that decides whether a sampled frame is worth
+# running the detectors on. It sits on top of FRAME_SAMPLE_RATE and only
+# ever drops frames the reader has already sampled.
+MOTION_GATE_ENABLED = (
+    os.getenv("MOTION_GATE_ENABLED", "true").lower() == "true"
+)
+
+# Percentage (0-100) of pixels that must change for a frame to be processed.
+MOTION_DIFF_THRESHOLD = float(os.getenv("MOTION_DIFF_THRESHOLD", "2.0"))
+
+# A per-pixel grey-level difference (0-255) at or below this is noise.
+MOTION_PIXEL_NOISE_THRESHOLD = int(
+    os.getenv("MOTION_PIXEL_NOISE_THRESHOLD", "25")
+)
+
+# A frame is always processed at least this often, even on a static scene.
+MOTION_GATE_MAX_GAP_SECONDS = float(
+    os.getenv("MOTION_GATE_MAX_GAP_SECONDS", "1.0")
+)
+
 # Detector mode
 # "mock" keeps the pipeline runnable without model weights or a GPU
 # (local dev / CI). "yolo" loads real YOLO weights from disk.
