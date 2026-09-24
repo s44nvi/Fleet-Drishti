@@ -1,0 +1,16 @@
+# Core edge runtime
+opencv-python==5.0.0.93
+numpy==2.5.2
+requests==2.34.2
+
+# Detection models. Only needed when DETECTOR_MODE=yolo.
+# The pipeline still runs end to end in mock mode without these.
+ultralytics==8.4.128
+torch==2.13.0
+torchvision==0.28.0
+
+# ANPR / number-plate reading. Only needed when ANPR_MODE=easyocr.
+easyocr==1.7.2
+
+# Tests
+pytest==9.1.1
