@@ -1,52 +1,89 @@
+import random
 import requests
+from datetime import datetime
 
 API_URL = "http://127.0.0.1:8000"
 
-# Second bus
-BUS_ID = "312f8278-5bd1-493e-81a6-f678ed74795e"
-ROUTE_ID = "7f974462-2d79-43dd-b2e9-c4e014778eb3"
-CAMERA_ID = "273194d5-0b98-4ec2-9b53-00afbcb509d5"
+BUS_1 = "fff745f2-138e-47e2-a9dd-b7dd43e13621"
+ROUTE_1 = "76322705-b364-4cc1-9e0f-d2182c755856"
+CAMERA_1 = "783ecb97-91f5-414a-ab4d-3ac2b930f4a5"
 
 
-# Login
-login_response = requests.post(
-    f"{API_URL}/auth/login",
-    json={
-        "email": "admin@citylens.com",
-        "password": "admin123",
-    },
-)
+def get_token():
+    response = requests.post(
+        f"{API_URL}/auth/login",
+        json={
+            "email": "admin@citylens.com",
+            "password": "admin123",
+        },
+    )
 
-print("LOGIN:", login_response.status_code)
+    assert response.status_code == 200
 
-token = login_response.json()["access_token"]
-
-headers = {
-    "Authorization": f"Bearer {token}"
-}
+    return response.json()["access_token"]
 
 
-# Second bus observes the same pothole area
-payload = {
-    "type": "road_defect",
-    "subtype": "pothole",
-    "confidence": 0.88,
-    "timestamp": "2026-09-12T18:35:00",
-    "gps": {
-        "lat": 19.0761,
-        "lng": 72.8778,
-    },
-    "bus_id": BUS_ID,
-    "route_id": ROUTE_ID,
-    "camera_id": CAMERA_ID,
-}
+def create_event(token, bus_id, route_id, camera_id, timestamp, lat, lng, confidence):
+    response = requests.post(
+        f"{API_URL}/events",
+        json={
+            "type": "road_defect",
+            "subtype": "pothole",
+            "confidence": confidence,
+            "timestamp": timestamp,
+            "gps": {
+                "lat": lat,
+                "lng": lng,
+            },
+            "bus_id": bus_id,
+            "route_id": route_id,
+            "camera_id": camera_id,
+        },
+        headers={
+            "Authorization": f"Bearer {token}",
+        },
+    )
+
+    assert response.status_code == 201
+
+    return response.json()
 
 
-event_response = requests.post(
-    f"{API_URL}/events",
-    json=payload,
-    headers=headers,
-)
+def get_issue(token, issue_id):
+    response = requests.get(
+        f"{API_URL}/issues/{issue_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200
+    return response.json()
 
-print("SECOND BUS EVENT:", event_response.status_code)
-print(event_response.json())
+
+def test_event_creates_and_fuses_into_issue():
+    """
+    A single road_defect event posted to /events should:
+    - be accepted (201) with a real event id
+    - get fused into a persistent Issue (issue_id set, not dropped)
+    - that Issue's fields (confidence/priority/observation_count)
+      should be sane
+    """
+    token = get_token()
+    base_time = datetime.now().replace(microsecond=0)
+    # Fresh random spot each run so this doesn't collide with an issue
+    # left by a prior run (MATCH_DISTANCE_METERS is 50m).
+    lat = 19.0761 + random.uniform(-0.01, 0.01)
+    lng = 72.8778 + random.uniform(-0.01, 0.01)
+
+    event = create_event(
+        token, BUS_1, ROUTE_1, CAMERA_1,
+        base_time.isoformat(), lat, lng, 0.88,
+    )
+
+    assert event["id"] is not None
+    assert event["issue_id"] is not None
+
+    issue = get_issue(token, event["issue_id"])
+
+    assert issue["id"] == event["issue_id"]
+    assert 0.0 <= issue["confidence"] <= 1.0
+    assert 0.0 <= issue["priority"] <= 100.0
+    assert issue["observation_count"] >= 1
