@@ -2,7 +2,12 @@ import random
 import requests
 from datetime import datetime, timedelta
 
-from app.services.issue_service import fuse_confidence, calculate_priority, severity_label
+from app.services.issue_service import (
+    fuse_confidence,
+    calculate_priority,
+    severity_label,
+    resolve_severity_score,
+)
 from app.models.core import Issue
 
 API_URL = "http://127.0.0.1:8000"
@@ -30,12 +35,12 @@ def get_token():
     return response.json()["access_token"]
 
 
-def create_event(token, bus_id, route_id, camera_id, timestamp, lat, lng, confidence):
+def create_event(token, bus_id, route_id, camera_id, timestamp, lat, lng, confidence, subtype="pothole"):
     response = requests.post(
         f"{API_URL}/events",
         json={
             "type": "road_defect",
-            "subtype": "pothole",
+            "subtype": subtype,
             "confidence": confidence,
             "timestamp": timestamp,
             "gps": {
@@ -124,6 +129,18 @@ def test_severity_label_buckets_score():
     assert severity_label(85) == "high"   # waterlogging
     assert severity_label(70) == "medium"  # pothole
     assert severity_label(50) == "low"
+
+
+def test_resolve_severity_score_aliases_match_canonical_names():
+    # M5's alternate names must resolve to the exact same score as the
+    # canonical SEVERITY_SCORES key they alias.
+    assert resolve_severity_score("damaged_road") == resolve_severity_score("road_damage") == 80
+    assert resolve_severity_score("missing_divider") == resolve_severity_score("damaged_divider") == 75
+    assert resolve_severity_score("damaged_signboard") == resolve_severity_score("damaged_traffic_sign") == 65
+
+
+def test_resolve_severity_score_unrecognized_subtype_falls_back_to_default():
+    assert resolve_severity_score("some_unknown_defect_type") == 50
 
 
 def test_priority_distinct_from_confidence():
@@ -284,3 +301,28 @@ def test_observation_count_reflects_linked_events():
     assert second_event["issue_id"] == issue_id
 
     assert get_issue(token, issue_id)["observation_count"] == 2
+
+
+def test_aliased_subtype_gets_canonical_severity_but_keeps_original_subtype():
+    """
+    An event sent with subtype="damaged_road" (M5's alternate name) must
+    get the same severity as "road_damage" (SEVERITY_SCORES: 80 ->
+    "high"), while the Issue's stored/returned subtype stays exactly
+    "damaged_road" - the alias only affects severity lookup, never the
+    stored data.
+    """
+    token = get_token()
+    base_time = datetime.now().replace(microsecond=0)
+    lat = 19.3500 + random.uniform(-0.01, 0.01)
+    lng = 73.2000 + random.uniform(-0.01, 0.01)
+
+    event = create_event(
+        token, BUS_1, ROUTE_1, CAMERA_1,
+        base_time.isoformat(), lat, lng, 0.85,
+        subtype="damaged_road",
+    )
+
+    issue = get_issue(token, event["issue_id"])
+
+    assert issue["subtype"] == "damaged_road"
+    assert issue["severity"] == "high"

@@ -46,6 +46,24 @@ SEVERITY_SCORES = {
     "other_hazard": 60,
 }
 
+# The M5 edge pipeline sends alternate names for some of the same
+# defect types above. This maps those alternate names onto the
+# canonical SEVERITY_SCORES key so severity/priority scoring works
+# regardless of which naming convention the sender used - it does NOT
+# rename or overwrite the actual subtype stored on the Event/Issue or
+# returned in API responses, only which score gets looked up.
+SUBTYPE_SEVERITY_ALIASES = {
+    "damaged_road": "road_damage",
+    "missing_divider": "damaged_divider",
+    "damaged_signboard": "damaged_traffic_sign",
+}
+
+
+def resolve_severity_score(subtype: str) -> int:
+    """Look up a subtype's severity score, resolving known M5 aliases first."""
+    canonical_subtype = SUBTYPE_SEVERITY_ALIASES.get(subtype, subtype)
+    return SEVERITY_SCORES.get(canonical_subtype, 50)
+
 # Confidence fusion cap. Without a cap, sequential noisy-OR fusion
 # asymptotically approaches 1.0 as more observations arrive, which is
 # unrealistic (sensor/report noise means we should never claim near
@@ -125,7 +143,7 @@ def calculate_priority(
 
     Returns a score from 0 to 100.
     """
-    base_score = SEVERITY_SCORES.get(issue.subtype, 50)
+    base_score = resolve_severity_score(issue.subtype)
 
     confidence_score = max(0.0, min(confidence, 1.0)) * 15
 
@@ -331,7 +349,7 @@ def create_issue_from_event(db: Session, event: Event):
     # First observation: fuse from a prior confidence of 0.0 with the
     # "new observer" weight of 1.0.
     issue.confidence = fuse_confidence(0.0, event.confidence, NEW_OBSERVER_WEIGHT)
-    issue.severity = severity_label(SEVERITY_SCORES.get(issue.subtype, 50))
+    issue.severity = severity_label(resolve_severity_score(issue.subtype))
 
     issue.priority = calculate_priority(
         issue,
