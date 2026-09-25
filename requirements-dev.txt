@@ -1,0 +1,7 @@
+# Extra dependencies for local dev tooling only - not needed to run the
+# actual backend (app/). Install with:
+#   pip install -r requirements.txt -r requirements-dev.txt
+#
+# ultralytics (and the torch/torchvision/opencv it pulls in) is only
+# used by tools/dev_test_events.py, a throwaway YOLO test harness.
+ultralytics==8.4.160

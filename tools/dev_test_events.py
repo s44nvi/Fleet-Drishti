@@ -8,6 +8,10 @@ happen in real time.
 This is a throwaway local testing harness, not part of the app or test
 suite. It is not wired into any CI/pytest run.
 
+Requires the dev-only dependencies (ultralytics, not needed by the app
+itself):
+    pip install -r requirements-dev.txt
+
 Usage:
     python tools/dev_test_events.py <path/to/image_or_video> [--conf 0.4]
         [--api-url http://127.0.0.1:8000]
