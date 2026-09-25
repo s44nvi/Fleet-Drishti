@@ -12,6 +12,10 @@ class Settings(BaseSettings):
 
     class Config:
         env_file = ".env"
+        # .env may carry vars meant for other consumers (e.g.
+        # JWT_SECRET_KEY, read directly by auth_service.py via
+        # os.getenv, not through Settings) - don't crash on those.
+        extra = "ignore"
 
 
 settings = Settings()
