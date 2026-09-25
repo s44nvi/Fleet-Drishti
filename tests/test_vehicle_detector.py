@@ -36,11 +36,25 @@ def make_frame(width=640, height=480):
     return np.zeros((height, width, 3), dtype=np.uint8)
 
 
-def test_normalize_vehicle_labels():
-    assert normalize_vehicle_class("Car") == "car"
-    assert normalize_vehicle_class("motorcycle") == "two_wheeler"
-    assert normalize_vehicle_class("bicycle") == "two_wheeler"
-    assert normalize_vehicle_class("truck") == "truck"
+def test_normalize_coco_labels_collapse_to_4_wheeler():
+    assert normalize_vehicle_class("Car") == "4-wheeler"
+    assert normalize_vehicle_class("bus") == "4-wheeler"
+    assert normalize_vehicle_class("truck") == "4-wheeler"
+
+
+def test_normalize_coco_labels_collapse_to_2_wheeler():
+    assert normalize_vehicle_class("motorcycle") == "2-wheeler"
+    assert normalize_vehicle_class("motorbike") == "2-wheeler"
+    assert normalize_vehicle_class("bicycle") == "2-wheeler"
+    assert normalize_vehicle_class("two wheeler") == "2-wheeler"
+
+
+def test_normalize_canonical_labels_pass_through_unchanged():
+    # M2's real model output (or anything already in the canonical
+    # taxonomy) must pass through unchanged.
+    assert normalize_vehicle_class("2-wheeler") == "2-wheeler"
+    assert normalize_vehicle_class("3-wheeler") == "3-wheeler"
+    assert normalize_vehicle_class("4-wheeler") == "4-wheeler"
 
 
 def test_normalize_non_vehicle_returns_none():
@@ -50,18 +64,17 @@ def test_normalize_non_vehicle_returns_none():
 
 def test_count_by_class_counts_every_class():
     detections = [
-        Detection("car", 0.9, (0, 0, 1, 1)),
-        Detection("car", 0.9, (0, 0, 1, 1)),
-        Detection("bus", 0.8, (0, 0, 1, 1)),
+        Detection("4-wheeler", 0.9, (0, 0, 1, 1)),
+        Detection("4-wheeler", 0.9, (0, 0, 1, 1)),
+        Detection("2-wheeler", 0.8, (0, 0, 1, 1)),
     ]
 
     counts = count_by_class(detections)
 
     assert counts == {
-        "car": 2,
-        "bus": 1,
-        "truck": 0,
-        "two_wheeler": 0,
+        "2-wheeler": 1,
+        "3-wheeler": 0,
+        "4-wheeler": 2,
     }
 
 
@@ -86,7 +99,7 @@ def test_yolo_vehicle_detector_classifies_vehicles():
 
     detections = detector.detect(make_frame())
 
-    assert [d.class_name for d in detections] == ["car", "two_wheeler"]
+    assert [d.class_name for d in detections] == ["4-wheeler", "2-wheeler"]
 
 
 def test_mock_vehicle_detector_cycles_counts():

@@ -1,10 +1,14 @@
 """
 Vehicle detection and classification.
 
-COCO-pretrained YOLO already covers every vehicle class we report, so
-"yolo" mode here works with public weights (VEHICLE_MODEL_PATH, default
-yolov8n.pt) - no fine-tuning needed. "mock" mode keeps the pipeline
-runnable without weights.
+Vehicle classes are aligned to M2's actual trained model taxonomy
+(pedestrian/2-wheeler/3-wheeler/4-wheeler), not the generic COCO
+classes a stand-in "yolo" mode currently reports. COCO has no
+auto-rickshaw ("3-wheeler") class, so that bucket only ever comes
+from M2's real model output - identity aliases are included below so
+that output passes through unchanged once VEHICLE_MODEL_PATH points
+at it. Until then, "yolo" mode's COCO labels (car/bus/truck/
+motorcycle/etc.) are collapsed onto the closest matching bucket.
 """
 from itertools import cycle
 
@@ -18,20 +22,27 @@ from detectors.yolo_backend import load_model, run_model
 
 
 VEHICLE_CLASSES = (
-    "car",
-    "bus",
-    "truck",
-    "two_wheeler",
+    "2-wheeler",
+    "3-wheeler",
+    "4-wheeler",
 )
 
 VEHICLE_ALIASES = {
-    "car": "car",
-    "bus": "bus",
-    "truck": "truck",
-    "two wheeler": "two_wheeler",
-    "motorcycle": "two_wheeler",
-    "motorbike": "two_wheeler",
-    "bicycle": "two_wheeler",
+    # Already-canonical labels (e.g. M2's real model output) pass
+    # through unchanged. Keys are written in the space-separated form
+    # normalize_vehicle_class() produces (it maps both "_" and "-" to
+    # a space before this lookup), matching "two wheeler" below.
+    "2 wheeler": "2-wheeler",
+    "3 wheeler": "3-wheeler",
+    "4 wheeler": "4-wheeler",
+    # Generic COCO labels, collapsed onto the closest bucket.
+    "car": "4-wheeler",
+    "bus": "4-wheeler",
+    "truck": "4-wheeler",
+    "motorcycle": "2-wheeler",
+    "motorbike": "2-wheeler",
+    "bicycle": "2-wheeler",
+    "two wheeler": "2-wheeler",
 }
 
 

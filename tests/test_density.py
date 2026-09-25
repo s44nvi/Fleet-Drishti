@@ -6,7 +6,7 @@ from density import (
 from detectors.base import Detection
 
 
-def make_vehicles(count, class_name="car", confidence=0.8):
+def make_vehicles(count, class_name="4-wheeler", confidence=0.8):
     return [
         Detection(
             class_name=class_name,
@@ -96,15 +96,15 @@ def test_signal_carries_counts_and_confidence():
     monitor = make_monitor()
 
     vehicles = (
-        make_vehicles(6, "car", 0.9)
-        + make_vehicles(2, "bus", 0.7)
+        make_vehicles(6, "4-wheeler", 0.9)
+        + make_vehicles(2, "2-wheeler", 0.7)
     )
 
     signal = monitor.update(vehicles, 0.0)
 
     assert signal.vehicle_count == 8
-    assert signal.counts_by_class["car"] == 6
-    assert signal.counts_by_class["bus"] == 2
+    assert signal.counts_by_class["4-wheeler"] == 6
+    assert signal.counts_by_class["2-wheeler"] == 2
     assert 0.0 < signal.confidence <= 1.0
 
 
