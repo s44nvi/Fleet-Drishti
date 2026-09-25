@@ -256,3 +256,31 @@ def test_noisy_or_fusion_persisted_on_issue_end_to_end():
 
     # Confidence should have increased with each confirmation.
     assert c1 < c2 < c3
+
+
+def test_observation_count_reflects_linked_events():
+    """
+    observation_count on IssueOut = count of Events linked via
+    Event.issue_id - a freshly created issue has 1, and a second bus
+    observing the same issue bumps it to 2.
+    """
+    token = get_token()
+    base_time = datetime.now().replace(microsecond=0)
+    lat = 19.2500 + random.uniform(-0.01, 0.01)
+    lng = 73.1000 + random.uniform(-0.01, 0.01)
+
+    first_event = create_event(
+        token, BUS_1, ROUTE_1, CAMERA_1,
+        base_time.isoformat(), lat, lng, 0.85,
+    )
+    issue_id = first_event["issue_id"]
+
+    assert get_issue(token, issue_id)["observation_count"] == 1
+
+    second_event = create_event(
+        token, BUS_2, ROUTE_2, CAMERA_2,
+        (base_time + timedelta(minutes=5)).isoformat(), lat + 0.00005, lng + 0.00005, 0.80,
+    )
+    assert second_event["issue_id"] == issue_id
+
+    assert get_issue(token, issue_id)["observation_count"] == 2

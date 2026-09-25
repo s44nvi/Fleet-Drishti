@@ -154,8 +154,36 @@ def calculate_priority(
     return min(round(priority, 2), 100)
 
 
+def get_observation_count(db: Session, issue_id: str) -> int:
+    """
+    Number of Events currently linked to this Issue via Event.issue_id -
+    i.e. the count already used internally by process_event_for_issue's
+    fusion/priority logic, exposed here for API responses (IssueOut.
+    observation_count). Computed on-the-fly rather than stored, since
+    this is a hackathon-scale prototype with modest data volume; an
+    extra COUNT query per issue read is a non-issue at this scale, and
+    it avoids having to keep a denormalized counter column in sync.
+    Citizen reports are intentionally NOT counted here - "observations"
+    means Events (bus/route detections), not citizen reports.
+    """
+    return db.query(Event).filter(Event.issue_id == issue_id).count()
+
+
+def _attach_observation_count(db: Session, issue: Issue) -> Issue:
+    """Set a transient (non-column) attribute IssueOut reads via from_attributes."""
+    if issue is not None:
+        issue.observation_count = get_observation_count(db, issue.id)
+
+    return issue
+
+
 def list_issues(db: Session):
-    return db.query(Issue).order_by(Issue.last_seen.desc()).all()
+    issues = db.query(Issue).order_by(Issue.last_seen.desc()).all()
+
+    for issue in issues:
+        _attach_observation_count(db, issue)
+
+    return issues
 
 
 def get_issue(db: Session, issue_id: str):
@@ -164,7 +192,9 @@ def get_issue(db: Session, issue_id: str):
     except (ValueError, TypeError, AttributeError):
         return None
 
-    return db.query(Issue).filter(Issue.id == issue_id).first()
+    issue = db.query(Issue).filter(Issue.id == issue_id).first()
+
+    return _attach_observation_count(db, issue)
 
 
 def update_issue_status(db: Session, issue_id: str, status: str):
@@ -177,7 +207,7 @@ def update_issue_status(db: Session, issue_id: str, status: str):
     db.commit()
     db.refresh(issue)
 
-    return issue
+    return _attach_observation_count(db, issue)  # db.refresh() dropped the transient attribute
 
 
 def distance_meters(lat1, lng1, lat2, lng2):
@@ -315,7 +345,7 @@ def create_issue_from_event(db: Session, event: Event):
     db.commit()
     db.refresh(issue)
 
-    return issue
+    return _attach_observation_count(db, issue)
 
 
 def process_event_for_issue(db: Session, event: Event):
@@ -373,6 +403,6 @@ def process_event_for_issue(db: Session, event: Event):
         db.commit()
         db.refresh(existing_issue)
 
-        return existing_issue
+        return _attach_observation_count(db, existing_issue)
 
     return create_issue_from_event(db, event)

@@ -81,6 +81,7 @@ class IssueOut(BaseModel):
     severity: Optional[str] = None
     priority: Optional[float] = None
     confidence: float = 0.0
+    observation_count: int = 0
     status: str
     first_seen: datetime
     last_seen: datetime
