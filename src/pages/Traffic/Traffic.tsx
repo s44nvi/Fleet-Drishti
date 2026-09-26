@@ -281,7 +281,12 @@ export function Traffic() {
   const allReadings = useMemo(() => readings ?? [], [readings]);
   const observations = useMemo<TrafficObservation[]>(() => {
     const fromEvents: TrafficObservation[] = (events ?? [])
-      .filter((e) => e.eventType === "traffic")
+      // "traffic_density" is the real backend's actual value for this
+      // domain (underscore, not the mock "traffic") - matched alongside
+      // it, not instead of it. Real backend data can carry a value outside
+      // this frontend's EventType union, so eventType is compared as a
+      // plain string here rather than narrowed to that type.
+      .filter((e) => (e.eventType as string) === "traffic" || (e.eventType as string) === "traffic_density")
       .map((e) => ({
         id: e.eventId,
         title: categoryVisual(e.subtype).label,

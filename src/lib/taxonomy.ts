@@ -59,8 +59,14 @@ export type RoadIssueCategory = (typeof ROAD_ISSUE_CATEGORIES)[number];
 
 // Shared by Issue.type and Event.eventType — both unions include these two
 // literal values for exactly the domains the Road Issues page covers.
+//
+// "road_defect" is the real backend's actual value for this domain
+// (underscore, not hyphen) - matched alongside "road-defect" so real
+// Issues/Events show up here too. This is a pure string-match addition,
+// not a taxonomy redesign: the hyphenated mock values are unchanged and
+// still matched, since some data may still use them.
 export function isRoadDomainType(type: string): boolean {
-  return type === "road-defect" || type === "environmental";
+  return type === "road-defect" || type === "road_defect" || type === "environmental";
 }
 
 export function roadIssueCategoryForSubtype(subtype: string): RoadIssueCategory {
