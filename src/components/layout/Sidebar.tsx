@@ -4,6 +4,7 @@ import { Menu, X } from "lucide-react";
 import { NAV_ITEMS, SECONDARY_NAV_ITEMS } from "../../lib/nav";
 import { cn } from "../../lib/cn";
 import { SidebarCityBranding } from "./SidebarCityBranding";
+import { SignOutButton } from "./SignOutButton";
 import type { NavLeafItem } from "../../types";
 
 function NavItem({ item, compact, onNavigate }: { item: NavLeafItem; compact?: boolean; onNavigate?: () => void }) {
@@ -67,6 +68,7 @@ export function Sidebar() {
         <NavContents />
       </div>
       <SidebarCityBranding />
+      <SignOutButton />
     </aside>
   );
 }
@@ -118,6 +120,7 @@ export function MobileNav() {
               <NavContents onNavigate={() => setOpen(false)} />
             </div>
             <SidebarCityBranding />
+            <SignOutButton />
           </div>
         </div>
       )}

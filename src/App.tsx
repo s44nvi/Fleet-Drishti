@@ -1,5 +1,7 @@
 import { Routes, Route } from "react-router-dom";
 import { AppShell } from "./components/layout";
+import { Login } from "./pages/Login";
+import { RequireAuth } from "./lib/auth/RequireAuth";
 import { CommandCenter } from "./pages/CommandCenter";
 import { LiveMap } from "./pages/LiveMap";
 import { RoadIssues } from "./pages/RoadIssues";
@@ -25,24 +27,27 @@ import { NotFound } from "./pages/NotFound";
 function App() {
   return (
     <Routes>
-      <Route element={<AppShell />}>
-        <Route index element={<CommandCenter />} />
-        <Route path="live-map" element={<LiveMap />} />
-        <Route path="road-issues" element={<RoadIssues />} />
-        <Route path="road-issues/:issueId" element={<IssueIntelligence />} />
-        <Route path="traffic" element={<Traffic />} />
-        <Route path="safety" element={<Safety />} />
-        <Route path="infrastructure" element={<Infrastructure />} />
-        <Route path="fleet" element={<Fleet />} />
-        <Route path="fleet/:busId" element={<BusDetail />} />
-        <Route path="routes" element={<RoutesList />} />
-        <Route path="routes/:routeId" element={<RouteDetail />} />
-        <Route path="analytics" element={<Analytics />} />
-        <Route path="priority-queue" element={<PriorityQueue />} />
-        <Route path="cameras" element={<Cameras />} />
-        <Route path="live-ai" element={<LiveAI />} />
-        <Route path="architecture" element={<Architecture />} />
-        <Route path="*" element={<NotFound />} />
+      <Route path="login" element={<Login />} />
+      <Route element={<RequireAuth />}>
+        <Route element={<AppShell />}>
+          <Route index element={<CommandCenter />} />
+          <Route path="live-map" element={<LiveMap />} />
+          <Route path="road-issues" element={<RoadIssues />} />
+          <Route path="road-issues/:issueId" element={<IssueIntelligence />} />
+          <Route path="traffic" element={<Traffic />} />
+          <Route path="safety" element={<Safety />} />
+          <Route path="infrastructure" element={<Infrastructure />} />
+          <Route path="fleet" element={<Fleet />} />
+          <Route path="fleet/:busId" element={<BusDetail />} />
+          <Route path="routes" element={<RoutesList />} />
+          <Route path="routes/:routeId" element={<RouteDetail />} />
+          <Route path="analytics" element={<Analytics />} />
+          <Route path="priority-queue" element={<PriorityQueue />} />
+          <Route path="cameras" element={<Cameras />} />
+          <Route path="live-ai" element={<LiveAI />} />
+          <Route path="architecture" element={<Architecture />} />
+          <Route path="*" element={<NotFound />} />
+        </Route>
       </Route>
     </Routes>
   );
