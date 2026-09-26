@@ -16,7 +16,7 @@ import {
   safetyMarker,
   trafficMarker,
 } from "../../lib/mapMarkers";
-import { ISSUE_STATUS } from "../../lib/status";
+import { ISSUE_STATUS, issueStatusMeta } from "../../lib/status";
 import { CONGESTION_DISPLAY_LABEL, CONGESTION_TONE } from "../../lib/congestion";
 import { datasetAnchor } from "../../lib/pulse";
 import { formatMinutesAgo, minutesAgo } from "../../lib/timeAgo";
@@ -100,7 +100,7 @@ export function LiveMap() {
             <SeverityBadge severity={issue.severity} />
           </Fact>
           <Fact label="Status">
-            <StatusBadge tone={ISSUE_STATUS[issue.status].tone}>{ISSUE_STATUS[issue.status].label}</StatusBadge>
+            <StatusBadge tone={issueStatusMeta(issue.status).tone}>{issueStatusMeta(issue.status).label}</StatusBadge>
           </Fact>
           <Fact label="Seen by">{issue.observingBuses.join(", ")}</Fact>
           <Fact label="Last seen">{formatMinutesAgo(minutesAgo(issue.lastSeen, anchor))}</Fact>

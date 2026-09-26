@@ -4,7 +4,7 @@ import { ObservationRow } from "../../components/events";
 import { useAsyncData } from "../../hooks/useAsyncData";
 import { issueService } from "../../services";
 import { computePriorityBreakdown } from "../../lib/priorityScore";
-import { ISSUE_STATUS } from "../../lib/status";
+import { issueStatusMeta } from "../../lib/status";
 import { categoryVisual } from "../../lib/visuals";
 
 // Action queue: open issues ranked by the explainable demo priority score.
@@ -45,7 +45,7 @@ export function PriorityQueue() {
                         <Bus size={12} aria-hidden="true" />
                         {issue.observingBuses.length}
                       </span>
-                      <StatusBadge tone={ISSUE_STATUS[issue.status].tone}>{ISSUE_STATUS[issue.status].label}</StatusBadge>
+                      <StatusBadge tone={issueStatusMeta(issue.status).tone}>{issueStatusMeta(issue.status).label}</StatusBadge>
                     </>
                   }
                   aside={

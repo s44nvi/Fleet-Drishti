@@ -8,7 +8,7 @@ import { useAsyncData } from "../../hooks/useAsyncData";
 import { eventService, fleetService, issueService, mediaService, routeService } from "../../services";
 import { computePriorityBreakdown } from "../../lib/priorityScore";
 import { issueMarker } from "../../lib/mapMarkers";
-import { ISSUE_STATUS } from "../../lib/status";
+import { issueStatusMeta } from "../../lib/status";
 import { categoryVisual } from "../../lib/visuals";
 import { cn } from "../../lib/cn";
 
@@ -67,7 +67,7 @@ export function IssueIntelligence() {
           issue && (
             <>
               <SeverityBadge severity={issue.severity} />
-              <StatusBadge tone={ISSUE_STATUS[issue.status].tone}>{ISSUE_STATUS[issue.status].label}</StatusBadge>
+              <StatusBadge tone={issueStatusMeta(issue.status).tone}>{issueStatusMeta(issue.status).label}</StatusBadge>
               <StatusBadge tone={corroborated ? "ok" : "neutral"} icon={corroborated ? ShieldCheck : undefined}>
                 {corroborated ? `Corroborated by ${issue.observingBuses.length} buses` : "Single observation"}
               </StatusBadge>

@@ -10,7 +10,7 @@ import { eventService, fleetService, issueService, mediaService, routeService } 
 import { groupEventsIntoIntelligence } from "../../lib/intelligenceGrouping";
 import { ROAD_ISSUE_CATEGORIES, isRoadDomainType, roadIssueCategoryForSubtype, type RoadIssueCategory } from "../../lib/taxonomy";
 import { issueMarker, observationGroupMarker } from "../../lib/mapMarkers";
-import { ISSUE_STATUS } from "../../lib/status";
+import { issueStatusMeta } from "../../lib/status";
 import { categoryVisual } from "../../lib/visuals";
 import { datasetAnchor } from "../../lib/pulse";
 import { formatMinutesAgo, minutesAgo } from "../../lib/timeAgo";
@@ -168,7 +168,7 @@ export function RoadIssues() {
                           <Bus size={12} aria-hidden="true" />
                           {item.busIds.length}
                         </span>
-                        {item.status && <span>{ISSUE_STATUS[item.status].label}</span>}
+                        {item.status && <span>{issueStatusMeta(item.status).label}</span>}
                       </>
                     }
                     aside={
@@ -208,7 +208,7 @@ export function RoadIssues() {
                   <div className="flex flex-wrap items-center gap-2">
                     <SeverityBadge severity={selected.severity} />
                     {selected.status ? (
-                      <StatusBadge tone={ISSUE_STATUS[selected.status].tone}>{ISSUE_STATUS[selected.status].label}</StatusBadge>
+                      <StatusBadge tone={issueStatusMeta(selected.status).tone}>{issueStatusMeta(selected.status).label}</StatusBadge>
                     ) : (
                       <StatusBadge tone="neutral">Awaiting corroboration</StatusBadge>
                     )}
