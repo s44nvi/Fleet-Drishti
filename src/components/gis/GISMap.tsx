@@ -225,10 +225,16 @@ const KIND_ORDER: MapMarkerKind[] = [
   "infrastructure-asset",
 ];
 
+// Real backend data can carry values this frontend's fixtures never did
+// (e.g. a legacy Issue row's severity stored as a raw score string like
+// "70" from before the backend bucketed severity into low/medium/high) —
+// every lookup here falls back to "neutral" instead of indexing
+// TONE_CLASSES/KIND_META with something that isn't actually a valid key,
+// which otherwise throws and (via GISMap's ErrorBoundary) blanks the map.
 function markerTone(marker: MapMarker): Tone {
-  if (marker.tone) return marker.tone;
-  if (marker.intensity) return SEVERITY_TONE[marker.intensity];
-  return KIND_META[marker.kind].tone;
+  if (marker.tone && marker.tone in TONE_CLASSES) return marker.tone;
+  if (marker.intensity && marker.intensity in SEVERITY_TONE) return SEVERITY_TONE[marker.intensity];
+  return KIND_META[marker.kind]?.tone ?? "neutral";
 }
 
 const prefersReducedMotion = () =>
