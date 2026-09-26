@@ -180,3 +180,61 @@ under `prefers-reduced-motion`.
 | Safety | Where are people/vehicles at risk? | Risk map | Incident timeline, ANPR empty state |
 | Infrastructure | What needs attention? | PS-category condition board | Compact map |
 | Analytics | What patterns are emerging? | Small multiples | Pipeline funnel |
+
+## 14. Page header + city banner
+
+Every main workspace (Command Center, Live Map, Fleet, Road Issues, Traffic,
+Safety, Infrastructure, Analytics) opens with the SAME header:
+`<PageHeader banner title subtitle context? actions? />`.
+
+- **Banner:** the Mumbai skyline + Sea Link panorama
+  (`public/brand/mumbai-city-banner.webp`, referenced only from
+  `components/layout/CityBanner.tsx`), full-bleed to the content column's
+  top and sides, 176px (168px below 1024px; grows only if copy wraps on
+  phones). One navy veil, strongest on the left behind the text, clearing
+  to the right so the bridge stays vivid.
+- **Crop:** fixed per breakpoint in `index.css` (`.fd-city-banner-img`) so
+  the pylons, deck and a line of water stay in frame at every banner width.
+  Pages never set their own crop, intensity or height.
+- **Type:** `text-page-title` 46/52 800 (40/44 on phones) white, subtitle
+  `text-page-subtitle` 17/26 (15/22) white/85, then the optional context
+  line (meta, source badge). Title always starts 24px from the top.
+- **Controls:** `actions` sit bottom-right in the banner (below the text on
+  phones), as white fields — e.g. Analytics' date range + city.
+- Detail screens (bus, issue, route…) use `PageHeader` without `banner`:
+  same type scale, ink on the canvas.
+
+## 15. Sidebar branding
+
+The sidebar ends, on every screen, with `SidebarCityBranding`
+(`components/layout/SidebarCityBranding.tsx`): the line-art Mumbai
+illustration (`MumbaiLineArt.tsx` — Gateway of India, palms, skyline,
+Bandra–Worli Sea Link, harbour ferry, water reflections; thin `civic`
+blue strokes (#5873B0) with faint faces — never the banner photograph), then **Mumbai** / Urban Intelligence
+Platform, a short rule, and the data caveat "Prototype · fixture data,
+simulated fleet". Only the nav above it scrolls; the block stays anchored.
+The drawing is always full size and centred (even side margins); on short
+viewports the nav above scrolls instead.
+
+## 16. GTFS transit network on maps
+
+One GIS foundation (`GISMap`) for every page. Data: `scripts/ingest-gtfs.mjs`
+turns the Mumbai-region GTFS (BEST, TMT, KDMT, VVMT) plus the OSRM
+road-snapped BEST geometry into `public/data/gtfs/*` (fetched once per
+session, never raw GTFS in the browser). Provenance: `src/data/gtfs/source.json`.
+
+Visual hierarchy, strongest first:
+1. Fleet Drishti sensing buses (DOM markers; DEMO density buses 22px vs 26px fixture).
+2. AI observations (existing category markers).
+3. Selected / hovered route — `action` blue, 4.5px.
+4. GTFS routes — thin, agency-tinted, low opacity ramping with zoom.
+   Road-snapped = solid; schematic stop-sequence = dashed and dimmer.
+5. Stops — small white dots, tiered: hubs ≥ z10.5, busy ≥ z12.5, all ≥ z14, names ≥ z15.5.
+
+Page defaults: Command Center / Fleet / Live Map show the network;
+Road Issues, Safety and Traffic keep it as toggleable context, off by
+default. Live Map adds route search.
+
+Honesty: GTFS is the scheduled network — never live positions. Fixture buses
+are SIMULATED; density buses are DEMO (deterministic, on real routes). Route
+cards always state how geometry was derived.

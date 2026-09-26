@@ -3,6 +3,7 @@ import { Link, NavLink } from "react-router-dom";
 import { Menu, X } from "lucide-react";
 import { NAV_ITEMS, SECONDARY_NAV_ITEMS } from "../../lib/nav";
 import { cn } from "../../lib/cn";
+import { SidebarCityBranding } from "./SidebarCityBranding";
 import type { NavLeafItem } from "../../types";
 
 function NavItem({ item, compact, onNavigate }: { item: NavLeafItem; compact?: boolean; onNavigate?: () => void }) {
@@ -55,27 +56,17 @@ function NavContents({ onNavigate }: { onNavigate?: () => void }) {
   );
 }
 
-// Honest replacement for the old "System Operational" pulse: says what the
-// data actually is, instead of claiming a health status nothing measures.
-function DataModeNote() {
-  return (
-    <div className="rounded-lg border border-line bg-surface-2 px-3 py-2.5">
-      <p className="text-meta text-ink-2 font-semibold">Mumbai · Prototype</p>
-      <p className="text-meta text-ink-3">Fixture data, simulated fleet</p>
-    </div>
-  );
-}
-
 export function Sidebar() {
   return (
     <aside className="hidden lg:flex fixed inset-y-0 left-0 z-40 w-[232px] flex-col border-r border-line bg-surface px-3 py-5">
       <Link to="/" className="px-2 mb-7 block" aria-label="Fleet Drishti home">
         <img src="/brand/fleet-drishti-navbar-logo.png" alt="Fleet Drishti" className="h-8 w-auto" />
       </Link>
-      <div className="flex-1 overflow-y-auto">
+      {/* Only the nav scrolls; the branding stays anchored below it. */}
+      <div className="min-h-0 flex-1 overflow-y-auto pb-4">
         <NavContents />
       </div>
-      <DataModeNote />
+      <SidebarCityBranding />
     </aside>
   );
 }
@@ -123,10 +114,10 @@ export function MobileNav() {
                 <X size={18} />
               </button>
             </div>
-            <div className="flex-1 overflow-y-auto">
+            <div className="min-h-0 flex-1 overflow-y-auto pb-4">
               <NavContents onNavigate={() => setOpen(false)} />
             </div>
-            <DataModeNote />
+            <SidebarCityBranding />
           </div>
         </div>
       )}

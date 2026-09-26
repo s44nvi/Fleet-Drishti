@@ -1,20 +1,22 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { Bus, Gauge, MapPin } from "lucide-react";
-import { ButtonLink, SeverityBadge, SourceBadge, StatusBadge } from "../../components/ui";
-import { GISMap, MapDrawer } from "../../components/gis";
+import { Bus, MapPin } from "lucide-react";
+import { ButtonLink, PageHeader, SeverityBadge, SourceBadge, StatusBadge } from "../../components/ui";
+import { GISMap, MapDrawer, SensingBusCard } from "../../components/gis";
 import { useAsyncData } from "../../hooks/useAsyncData";
 import { eventService, fleetService, issueService, routeService } from "../../services";
 import { groupEventsIntoIntelligence } from "../../lib/intelligenceGrouping";
 import { isInfrastructureAssetInScope, isRoadDomainType } from "../../lib/taxonomy";
+import { demoBusView, fixtureBusView } from "../../lib/sensingBus";
 import {
   busMarker,
+  demoBusMarker,
   infrastructureMarker,
   issueMarker,
   observationGroupMarker,
   safetyMarker,
   trafficMarker,
 } from "../../lib/mapMarkers";
-import { BUS_STATUS, ISSUE_STATUS } from "../../lib/status";
+import { ISSUE_STATUS } from "../../lib/status";
 import { CONGESTION_DISPLAY_LABEL, CONGESTION_TONE } from "../../lib/congestion";
 import { datasetAnchor } from "../../lib/pulse";
 import { formatMinutesAgo, minutesAgo } from "../../lib/timeAgo";
@@ -42,6 +44,11 @@ export function LiveMap() {
   const { data: networkStops } = useAsyncData(() => routeService.listNetworkStops(), []);
   const { data: networkRouteLines } = useAsyncData(() => routeService.listNetworkRouteLines(), []);
 
+  // DEMO density layer on the GTFS network, plus what the bus card needs.
+  const { data: demoBuses } = useAsyncData(() => fleetService.listDemoSensingBuses(), []);
+  const { data: cameras } = useAsyncData(() => fleetService.listCameras(), []);
+  const { data: detections } = useAsyncData(() => eventService.listDetections(), []);
+
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const anchor = useMemo(
@@ -64,37 +71,27 @@ export function LiveMap() {
       ...(safetyEvents ?? []).map((e) => safetyMarker(e, anchor)),
       ...roadGroups.map((g) => observationGroupMarker(g, anchor)),
       ...(issues ?? []).filter((i) => i.type !== "safety").map((i) => issueMarker(i, anchor)),
+      ...(demoBuses ?? []).map(demoBusMarker),
       ...(buses ?? []).map(busMarker),
     ],
-    [infrastructureIssues, hotspots, safetyEvents, roadGroups, issues, buses, anchor],
+    [infrastructureIssues, hotspots, safetyEvents, roadGroups, issues, demoBuses, buses, anchor],
   );
 
   const selectedMarker = markers.find((m) => m.id === selectedId);
   const selectedBus = buses?.find((b) => b.busId === selectedId);
+  const selectedDemoBus = demoBuses?.find((b) => b.busId === selectedId);
 
   function drawerBody(): ReactNode {
     if (!selectedMarker) return null;
     if (selectedBus) {
       const route = routes?.find((r) => r.routeId === selectedBus.routeId);
       return (
-        <>
-          <Fact label="Status">
-            <StatusBadge tone={BUS_STATUS[selectedBus.status].tone}>{BUS_STATUS[selectedBus.status].label}</StatusBadge>
-          </Fact>
-          <Fact label="Route">{route ? `${route.name} · ${route.origin} → ${route.destination}` : selectedBus.routeId}</Fact>
-          <Fact label="Speed">
-            <span className="inline-flex items-center gap-1 tabular-nums">
-              <Gauge size={12} aria-hidden="true" />
-              {selectedBus.speedKph} km/h
-            </span>
-          </Fact>
-          <Fact label="Last seen">{formatMinutesAgo(minutesAgo(selectedBus.lastSeenAt, anchor))}</Fact>
-          <Fact label="Position">
-            <SourceBadge source="simulated" />
-          </Fact>
-        </>
+        <SensingBusCard
+          bus={fixtureBusView(selectedBus, cameras ?? [], events ?? [], detections ?? [], route)}
+        />
       );
     }
+    if (selectedDemoBus) return <SensingBusCard bus={demoBusView(selectedDemoBus)} />;
     const issue = issues?.find((i) => i.issueId === selectedId);
     if (issue) {
       return (
@@ -172,47 +169,66 @@ export function LiveMap() {
   }
 
   return (
-    <div className="relative h-full w-full p-0 lg:p-3">
-      <h1 className="sr-only">Live Map</h1>
-      <GISMap
-        className="rounded-none lg:rounded-xl border-0 lg:border"
-        ariaLabel="Live map of Mumbai"
-        markers={markers}
-        stops={networkStops ?? []}
-        routeLines={networkRouteLines ?? []}
-        selectedId={selectedId}
-        drawerOpen={Boolean(selectedId)}
-        onSelect={setSelectedId}
-        legend={
-          <div className="flex items-center gap-2 text-micro text-ink-3">
-            <SourceBadge source="simulated" />
-            Fixture data
-          </div>
-        }
-        overlay={
-          selectedMarker && (
-            <MapDrawer
-              title={selectedMarker.label}
-              onClose={() => setSelectedId(null)}
-            >
-              <div className="flex flex-col">
-                {selectedMarker.detail && (
-                  <p className="flex items-center gap-1 text-meta text-ink-3 -mt-1 mb-2">
-                    {selectedBus ? <Bus size={12} aria-hidden="true" /> : <MapPin size={12} aria-hidden="true" />}
-                    {selectedMarker.detail}
-                  </p>
-                )}
-                <div className="divide-y divide-line">{drawerBody()}</div>
-                {selectedMarker.href && (
-                  <ButtonLink to={selectedMarker.href} variant="primary" className="w-full mt-3">
-                    Open details
-                  </ButtonLink>
-                )}
-              </div>
-            </MapDrawer>
-          )
-        }
-      />
+    <div className="relative flex h-full w-full flex-col p-0 lg:px-3 lg:pb-3">
+      {/* Same page header as every workspace, on the content column's
+          padding (this route is otherwise full-bleed); the map fills the rest. */}
+      <div className="shrink-0 px-4 pt-5 pb-4 sm:px-6 lg:-mx-3 lg:pt-6">
+        <PageHeader
+          title="Live Map"
+          subtitle="Explore fleet activity, observations, and urban intelligence across Mumbai."
+          banner
+        />
+      </div>
+      <div className="min-h-0 flex-1">
+        <GISMap
+          className="rounded-none lg:rounded-xl border-0 lg:border"
+          ariaLabel="Live map of Mumbai"
+          markers={markers}
+          stops={networkStops ?? []}
+          routeLines={networkRouteLines ?? []}
+          routeSearch
+          highlightRouteId={selectedMarker?.kind === "bus-probe" ? selectedMarker.gtfsRouteId ?? null : null}
+          flyToSelection={!(selectedMarker?.kind === "bus-probe" && selectedMarker.gtfsRouteId)}
+          selectedId={selectedId}
+          drawerOpen={Boolean(selectedId)}
+          onSelect={setSelectedId}
+          legend={
+            <div className="flex flex-col gap-1 text-micro text-ink-3">
+              <span className="flex items-center gap-2">
+                <SourceBadge source="simulated" />
+                Fixture fleet &amp; observations
+              </span>
+              <span className="flex items-center gap-2">
+                <SourceBadge source="demo" />
+                Extra buses on GTFS routes
+              </span>
+            </div>
+          }
+          overlay={
+            selectedMarker && (
+              <MapDrawer
+                title={selectedMarker.label}
+                onClose={() => setSelectedId(null)}
+              >
+                <div className="flex flex-col">
+                  {selectedMarker.detail && (
+                    <p className="flex items-center gap-1 text-meta text-ink-3 -mt-1 mb-2">
+                      {selectedBus ? <Bus size={12} aria-hidden="true" /> : <MapPin size={12} aria-hidden="true" />}
+                      {selectedMarker.detail}
+                    </p>
+                  )}
+                  <div className="divide-y divide-line">{drawerBody()}</div>
+                  {selectedMarker.href && (
+                    <ButtonLink to={selectedMarker.href} variant="primary" className="w-full mt-3">
+                      Open details
+                    </ButtonLink>
+                  )}
+                </div>
+              </MapDrawer>
+            )
+          }
+        />
+      </div>
     </div>
   );
 }

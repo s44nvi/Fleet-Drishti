@@ -41,6 +41,8 @@
   --color-safety-soft: #f1eafe;
 
   --color-network: #8fa3bf;
+  /* Civic line-art blue — the sidebar's Mumbai illustration and its rule. */
+  --color-civic: #5873b0;
   --color-media: #1b2638;
 
   --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
@@ -49,6 +51,20 @@
   --text-display--line-height: 36px;
   --text-display--letter-spacing: -0.02em;
   --text-display--font-weight: 800;
+  /* Page introduction (PageHeader / PageIntro) — the Analytics header scale,
+     shared by every page. `-sm` sizes apply below 640px. */
+  --text-page-title: 46px;
+  --text-page-title--line-height: 52px;
+  --text-page-title--letter-spacing: -0.03em;
+  --text-page-title--font-weight: 800;
+  --text-page-title-sm: 40px;
+  --text-page-title-sm--line-height: 44px;
+  --text-page-title-sm--letter-spacing: -0.03em;
+  --text-page-title-sm--font-weight: 800;
+  --text-page-subtitle: 17px;
+  --text-page-subtitle--line-height: 26px;
+  --text-page-subtitle-sm: 15px;
+  --text-page-subtitle-sm--line-height: 22px;
   --text-kpi: 26px;
   --text-kpi--line-height: 30px;
   --text-kpi--letter-spacing: -0.02em;
@@ -111,38 +127,104 @@
 }
 
 @layer components {
-  /* MapLibre chrome restyled to the design system. */
-  .maplibregl-ctrl-attrib {
-    font-family: var(--font-sans);
-    font-size: 10px;
+  /*
+    City banner crop (CityBanner / PageHeader). The source is a 2.5:1
+    panorama; the banner is far wider than tall, so the photo is fitted to
+    the banner's width and only a horizontal slice shows. The Sea Link's
+    pylons span ~42–72% of the source height and sit ~67% across, so each
+    step picks the vertical position that keeps pylon tops, deck and a
+    little water in the slice for that banner width (viewport below lg;
+    viewport − 232px sidebar from lg, capped at the 1600px column).
+    Phones are height-bound instead, so there the x position keeps the
+    bridge in frame.
+  */
+  .fd-city-banner-img {
+    object-position: 74% 50%;
   }
-  .maplibregl-ctrl-scale {
-    border-color: var(--color-ink-3);
-    color: var(--color-ink-2);
-    font-family: var(--font-sans);
-    font-size: 10px;
-    background: rgb(255 255 255 / 0.8);
+  @media (width >= 48rem) {
+    .fd-city-banner-img {
+      object-position: 50% 60%;
+    }
   }
-  .fd-map-tooltip .maplibregl-popup-content {
-    background: var(--color-ink);
-    color: #fff;
-    border-radius: 8px;
-    padding: 8px 10px;
-    font-family: var(--font-sans);
-    font-size: 12px;
-    line-height: 16px;
-    box-shadow: var(--shadow-float);
+  @media (width >= 64rem) {
+    .fd-city-banner-img {
+      object-position: 50% 66%;
+    }
   }
-  .fd-map-tooltip .maplibregl-popup-tip {
-    border-top-color: var(--color-ink);
-    border-bottom-color: var(--color-ink);
+  @media (width >= 80rem) {
+    .fd-city-banner-img {
+      object-position: 50% 62%;
+    }
   }
-  .fd-map-popup .maplibregl-popup-content {
-    border-radius: 10px;
-    padding: 10px 12px;
-    font-family: var(--font-sans);
-    box-shadow: var(--shadow-float);
+  @media (width >= 96rem) {
+    .fd-city-banner-img {
+      object-position: 50% 59%;
+    }
   }
+  @media (width >= 1832px) {
+    .fd-city-banner-img {
+      object-position: 50% 56%;
+    }
+  }
+
+}
+
+/*
+  MapLibre chrome restyled to the design system.
+
+  Deliberately NOT inside a cascade layer: maplibre-gl.css is un-layered,
+  and un-layered rules beat layered ones regardless of specificity. Inside
+  @layer, MapLibre's white popup background won while our white tooltip
+  text still applied — white text on white. Un-layered, plain specificity
+  decides, so every selector here is more specific than MapLibre's.
+*/
+.maplibregl-ctrl.maplibregl-ctrl-attrib {
+  font-family: var(--font-sans);
+  font-size: 10px;
+}
+.maplibregl-ctrl.maplibregl-ctrl-scale {
+  border-color: var(--color-ink-3);
+  color: var(--color-ink-2);
+  font-family: var(--font-sans);
+  font-size: 10px;
+  background: rgb(255 255 255 / 0.8);
+}
+
+/* Hover tooltip: dark ink card, white text. */
+.maplibregl-popup.fd-map-tooltip .maplibregl-popup-content {
+  background: var(--color-ink);
+  color: #fff;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 16px;
+  box-shadow: var(--shadow-float);
+}
+/* MapLibre colours only the tip side facing the point — match per anchor. */
+.fd-map-tooltip.maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
+.fd-map-tooltip.maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
+.fd-map-tooltip.maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip {
+  border-top-color: var(--color-ink);
+}
+.fd-map-tooltip.maplibregl-popup-anchor-top .maplibregl-popup-tip,
+.fd-map-tooltip.maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
+.fd-map-tooltip.maplibregl-popup-anchor-top-right .maplibregl-popup-tip {
+  border-bottom-color: var(--color-ink);
+}
+.fd-map-tooltip.maplibregl-popup-anchor-left .maplibregl-popup-tip {
+  border-right-color: var(--color-ink);
+}
+.fd-map-tooltip.maplibregl-popup-anchor-right .maplibregl-popup-tip {
+  border-left-color: var(--color-ink);
+}
+
+/* Callouts (bus / route / stop): white card. */
+.maplibregl-popup.fd-map-popup .maplibregl-popup-content {
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-family: var(--font-sans);
+  box-shadow: var(--shadow-float);
 }
 
 @keyframes fd-recent-ring {

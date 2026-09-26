@@ -31,7 +31,7 @@ export const DEFAULT_ZOOM = 11;
 export const MIN_ZOOM = 9;
 export const MAX_ZOOM = 18;
 
-// Rendering all ~885 BEST route-direction lines at full strength at the
+// Rendering all ~1,100 GTFS route-direction lines at full strength at the
 // default city-wide view (DEFAULT_ZOOM, ~3km) would be illegible spaghetti
 // that drowns out the Fleet Drishti markers it sits behind. Rather than a
 // hard minzoom that makes the whole network disappear below some threshold,
@@ -48,8 +48,20 @@ export const NETWORK_ROUTES_ZOOM_STOPS = {
   fullDetail: 17,
 };
 
-// The real BEST stop network (~4,800 stops citywide) would clutter the map
-// at the default city-wide zoom; only draw it once the viewer has zoomed in
-// enough that individual stops are actually useful — still closer than
-// having to reach the max zoom level, just closer than the route lines.
-export const NETWORK_STOPS_MIN_ZOOM = 13;
+
+// Muted per-operator route tints (GTFS agency_id). The network is context,
+// not content: these stay low-saturation and low-opacity so Fleet Drishti
+// buses and observations remain the strongest things on the map.
+export const AGENCY_ROUTE_COLORS: Record<string, string> = {
+  BEST: "#7f93b3",
+  TMT: "#6f9c88",
+  KDMT: "#b08d64",
+  VVMT: "#9486b8",
+};
+export const DEFAULT_ROUTE_COLOR = "#8fa3bf";
+
+// Stops are tiered at build time by how many routes serve them. Hubs show
+// city-wide, busy stops from mid zoom, every stop only when close in, and
+// names only when zoomed right in — ~7,500 stops never draw at once.
+export const STOP_TIER_MIN_ZOOM = { 1: 10.5, 2: 12.5, 3: 14 } as const;
+export const STOP_LABEL_MIN_ZOOM = 15.5;

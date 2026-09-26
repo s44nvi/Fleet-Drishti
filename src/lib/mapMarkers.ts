@@ -1,4 +1,5 @@
-import type { Bus, InfrastructureIssue, Issue, MapMarker, SafetyEvent, TrafficHotspot } from "../types";
+import type { Bus, DemoSensingBus, InfrastructureIssue, Issue, MapMarker, SafetyEvent, TrafficHotspot } from "../types";
+import { fleetRouteToGtfsRouteId } from "./gtfs/adapter";
 import type { IntelligenceGroup } from "./intelligenceGrouping";
 import { CONGESTION_DISPLAY_LABEL, congestionToIntensity } from "./congestion";
 import { BUS_STATUS } from "./status";
@@ -22,6 +23,26 @@ export function busMarker(bus: Bus): MapMarker {
     longitude: bus.location.longitude,
     href: `/fleet/${bus.busId}`,
     tone: BUS_STATUS[bus.status].tone,
+    positionSource: "SIMULATED",
+    gtfsRouteId: fleetRouteToGtfsRouteId(bus.routeId),
+  };
+}
+
+// DEMO density bus on a real GTFS route. No href: there is no bus-detail
+// page for a demo vehicle — pages show SensingBusCard instead.
+export function demoBusMarker(bus: DemoSensingBus): MapMarker {
+  return {
+    id: bus.busId,
+    kind: "bus-probe",
+    category: "bus",
+    label: bus.busId,
+    detail: `${bus.agencyId} · Route ${bus.routeShortName} · ${bus.status === "active" ? "Online" : "Idle"}`,
+    latitude: bus.latitude,
+    longitude: bus.longitude,
+    tone: bus.status === "active" ? "ok" : "watch",
+    positionSource: "DEMO",
+    gtfsRouteId: bus.gtfsRouteId,
+    excludeFromFit: true,
   };
 }
 

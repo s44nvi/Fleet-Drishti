@@ -1,5 +1,6 @@
 import { Outlet, useLocation } from "react-router-dom";
 import { Sidebar, MobileNav } from "./Sidebar";
+import { CONTENT_PADDING } from "./contentFrame";
 
 // Persistent frame: compact left sidebar (drawer below lg) + content.
 // Live Map is a full-bleed GIS workspace; every other route gets the padded
@@ -24,7 +25,7 @@ export function AppShell() {
             <Outlet />
           </div>
         ) : (
-          <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-4 px-4 py-5 sm:px-6 lg:py-6">
+          <div className={`mx-auto flex w-full max-w-[1600px] flex-col gap-4 ${CONTENT_PADDING}`}>
             <Outlet />
           </div>
         )}

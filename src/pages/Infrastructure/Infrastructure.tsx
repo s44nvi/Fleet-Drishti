@@ -159,6 +159,8 @@ export function Infrastructure() {
     <>
       <PageHeader
         title="Infrastructure"
+        subtitle="Track missing, damaged, or degraded urban infrastructure."
+        banner
         context={
           <>
             <span className="tabular-nums">

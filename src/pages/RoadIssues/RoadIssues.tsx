@@ -47,6 +47,7 @@ export function RoadIssues() {
   const { data: cameras } = useAsyncData(() => fleetService.listCameras(), []);
   const { data: routes } = useAsyncData(() => routeService.listRoutes(), []);
   const { data: networkRouteLines } = useAsyncData(() => routeService.listNetworkRouteLines(), []);
+  const { data: networkStops } = useAsyncData(() => routeService.listNetworkStops(), []);
 
   const [category, setCategory] = useState<CategoryFilter>("All");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -126,6 +127,8 @@ export function RoadIssues() {
     <>
       <PageHeader
         title="Road Issues"
+        subtitle="Track road defects and infrastructure observations detected across the fleet."
+        banner
         context={
           <>
             <span className="tabular-nums">
@@ -138,7 +141,7 @@ export function RoadIssues() {
 
       <FilterChips categories={ROAD_ISSUE_CATEGORIES} active={category} onChange={setCategory} counts={counts} />
 
-      <section className="grid grid-cols-1 xl:grid-cols-12 gap-4 xl:h-[calc(100dvh-13rem)] xl:min-h-[560px]">
+      <section className="grid grid-cols-1 xl:grid-cols-12 gap-4 xl:h-[calc(100dvh-19rem)] xl:min-h-[560px]">
         <Panel as="section" className="xl:col-span-5 flex flex-col min-h-0" aria-label="Road issues">
           {loading ? (
             <p className="p-6 text-body text-ink-3">Loading road issues…</p>
@@ -190,6 +193,9 @@ export function RoadIssues() {
           ariaLabel="Road issue locations"
           markers={visible.map((i) => i.marker)}
           routeLines={networkRouteLines ?? []}
+          stops={networkStops ?? []}
+          initialShowRoutes={false}
+          initialShowStops={false}
           selectedId={selectedId}
           drawerOpen={Boolean(selectedId)}
           hoveredId={hoveredId}

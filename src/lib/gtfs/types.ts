@@ -1,9 +1,8 @@
-// Shapes of the static JSON assets produced by scripts/ingest-gtfs.mjs from
-// the public mumbai-gtfs community feed's BEST slice (see
-// src/data/gtfs/source.json for provenance). These are intentionally
-// separate from Fleet Drishti's own domain types (types/route.ts) — this
-// file describes what the GTFS ingestion actually produced; adapter.ts is
-// the only place that translates between the two.
+// Shapes of the assets produced by scripts/ingest-gtfs.mjs from the public
+// mumbai-gtfs community feed (all operators) plus the OSRM road-snapped BEST
+// geometry. See src/data/gtfs/source.json for provenance. Kept separate from
+// Fleet Drishti's own domain types (types/route.ts) — adapter.ts is the only
+// place that translates between the two.
 
 export interface GtfsStopRef {
   stopId: string;
@@ -18,61 +17,90 @@ export interface GtfsCuratedRoute {
   longName: string;
   origin: GtfsStopRef;
   destination: GtfsStopRef;
-  /** Great-circle distance between the two named terminus stops — a real,
-   * derived approximation of route span. This feed has no shapes.txt, so
-   * there is no true on-road route length to draw on instead. */
+  /** Length along the representative trip's real stops. */
   approxDistanceKm: number;
   scheduledTripCount: number;
 }
 
-export interface GtfsStop {
-  stopId: string;
-  name: string;
-  latitude: number;
-  longitude: number;
-  area: string | null;
-}
-
-/** One route+direction's approximate path — see types/route.ts's
- * NetworkRouteLine, which this maps onto directly (the two shapes are
- * intentionally the same; this one just documents it as "what ingestion
- * produced"). The source feed can carry a route's Up/Down directions either
- * as the same gtfsRouteId with a different directionId, or as entirely
- * separate route_ids — so more than one GtfsRouteLine can share a
- * gtfsRouteId. */
-export interface GtfsRouteLine {
-  gtfsRouteId: string;
-  directionId: number;
+/** public/data/gtfs/routes.geojson feature properties. */
+export interface GtfsRouteLineProps {
+  id: string;
+  routeId: string;
+  agencyId: string;
   shortName: string;
   longName: string;
-  tripId: string;
+  directionId: number;
   stopCount: number;
+  /** First / last stop names of this direction's representative trip. */
+  from: string;
+  to: string;
   distanceKm: number;
-  geometryType: "approximate_stop_sequence";
-  geometry: { type: "LineString"; coordinates: [number, number][] };
+  geometry: "road" | "schematic";
+  repaired: number;
+}
+
+/** public/data/gtfs/stops.geojson feature properties. */
+export interface GtfsStopProps {
+  id: string;
+  name: string;
+  /** Comma-separated agency ids serving the stop. */
+  agencies: string;
+  routes: number;
+  tier: 1 | 2 | 3;
+}
+
+/** public/data/gtfs/route-index.json entry. */
+export interface GtfsRouteIndexEntry {
+  routeId: string;
+  agencyId: string;
+  shortName: string;
+  longName: string;
+  tripCount: number;
+  stopsServed: number;
+  directions: number;
+  geometry: "road" | "schematic" | null;
+  distanceKm: number | null;
+  bbox: [number, number, number, number] | null;
+}
+
+export interface GtfsAgencyStats {
+  agencyId: string;
+  name: string;
+  url: string | null;
+  routes: number;
+  trips: number;
+  stops: number;
+  roadGeometry: number;
+  schematicGeometry: number;
 }
 
 export interface GtfsSourceInfo {
-  agency: string;
   datasetName: string;
   repository: string;
   mobilityDatabaseFeedUrl: string;
   license: string;
+  feedPublisher: string | null;
+  feedFile: string;
   filesUsed: string[];
-  retrievedAt: string;
-  /** GTFS calendar/feed_info service validity window (YYYY-MM-DD), not a
-   * claim about when the underlying road network was last surveyed. */
+  generatedAt: string;
+  /** GTFS feed_info service validity window (YYYY-MM-DD). */
   serviceStartDate: string | null;
   serviceEndDate: string | null;
-  /** True only when today's date falls within [serviceStartDate,
-   * serviceEndDate] — never a claim of live/real-time data. */
+  /** True only when the build date fell within the service window — never a claim of live data. */
   isCurrent: boolean;
   hasShapes: boolean;
-  hasApproximateGeometry: boolean;
+  agencies: GtfsAgencyStats[];
+  totals: { routes: number; trips: number; stops: number; routeLines: number };
+  geometry: {
+    road: number;
+    schematic: number;
+    osrmFile: string | null;
+    osrmRepairedLegs: number;
+    osrmRouteLinesRepaired: number;
+    repairRule: string;
+    simplifyToleranceM: number;
+  };
+  stopTiers: { hubMinRoutes: number; busyMinRoutes: number; counts: number[] };
   notes: string;
-  totalRoutesInFeed: number;
-  totalStopsInFeed: number;
-  totalTripsInFeed: number;
-  totalRouteLinesDerived: number;
   curatedRouteIds: string[];
 }

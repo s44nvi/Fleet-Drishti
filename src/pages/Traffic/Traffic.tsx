@@ -81,6 +81,7 @@ export function Traffic() {
   const { data: clips } = useAsyncData(() => mediaService.listDetectionClips(), []);
   const { data: routes } = useAsyncData(() => routeService.listRoutes(), []);
   const { data: networkRouteLines } = useAsyncData(() => routeService.listNetworkRouteLines(), []);
+  const { data: networkStops } = useAsyncData(() => routeService.listNetworkStops(), []);
 
   const anchor = useMemo(() => datasetAnchor((readings ?? []).map((h) => h.observedAt)), [readings]);
   const [day, setDay] = useState(() => mondayIndex(anchor));
@@ -263,7 +264,7 @@ export function Traffic() {
       segmentGrids.length
         ? (routes ?? []).map((r) => {
             const short = r.routeId.replace("BEST-", "");
-            const line = networkRouteLines?.find((l) => l.shortName === short);
+            const line = networkRouteLines?.find((l) => l.agencyId === "BEST" && l.shortName === short);
             return {
               routeId: r.routeId,
               name: r.name,
@@ -318,6 +319,8 @@ export function Traffic() {
     <>
       <PageHeader
         title="Traffic Intelligence"
+        subtitle="Understand movement, congestion patterns, and traffic conditions."
+        banner
         context={
           <>
             <span className="inline-flex items-center gap-1">
@@ -339,7 +342,9 @@ export function Traffic() {
           ariaLabel={`Mumbai traffic heatmap, ${when}`}
           markers={markers}
           routeLines={networkRouteLines ?? []}
+          stops={networkStops ?? []}
           initialShowRoutes={false}
+          initialShowStops={false}
           rasterOverlay={rasterOverlay}
           congestionSegments={lines}
           selectedId={selectedId}

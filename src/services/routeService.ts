@@ -1,7 +1,7 @@
-import type { Bus, NetworkRouteLine, Route, TransitStop } from "../types";
+import type { Bus, NetworkRouteLine, Route, TransitRouteSummary, TransitStop } from "../types";
 import { mockRoutes, mockBuses } from "../data/mock";
 import { mockAsync } from "./mockAsync";
-import { getNetworkRouteLines, getNetworkStops } from "../lib/gtfs/adapter";
+import { getNetworkRouteLines, getNetworkStops, getRouteIndex } from "../lib/gtfs/adapter";
 
 export const routeService = {
   listRoutes(): Promise<Route[]> {
@@ -16,22 +16,27 @@ export const routeService = {
     return mockAsync(mockBuses.filter((bus) => bus.routeId === routeId));
   },
 
-  /** Real BEST stop network data adapted from the public mumbai-gtfs
-   * community feed (see src/data/gtfs/source.json) — static reference
-   * points, not a live arrivals feed. Callers rendering these on a map are
-   * responsible for zoom-gating visibility so the network layer doesn't
-   * overwhelm it. */
+  /** Every stop served by a trip in the Mumbai-region GTFS feed (BEST,
+   * TMT, KDMT, VVMT; see src/data/gtfs/source.json) — static reference
+   * points, not a live arrivals feed. Each carries a display `tier`; map
+   * callers zoom-gate by it so ~7,500 stops never draw at once. */
   async listNetworkStops(): Promise<TransitStop[]> {
     const stops = await getNetworkStops();
     return mockAsync(stops);
   },
 
-  /** Real BEST route paths adapted from the public GTFS feed — each an
-   * approximate stop-sequence-derived LineString (see
-   * types/route.ts::NetworkRouteLine), never official route geometry
-   * (this feed has no shapes.txt). */
+  /** One path per route + direction, all operators. BEST is road-snapped
+   * (OSRM, validated against the real stops); others are schematic stop
+   * sequences. Neither is official geometry — the feed has no shapes.txt
+   * (see types/route.ts::RouteGeometrySource). */
   async listNetworkRouteLines(): Promise<NetworkRouteLine[]> {
     const lines = await getNetworkRouteLines();
     return mockAsync(lines);
+  },
+
+  /** Per-route GTFS facts (scheduled trips, stops served, extent). */
+  async listRouteIndex(): Promise<TransitRouteSummary[]> {
+    const index = await getRouteIndex();
+    return mockAsync(index);
   },
 };

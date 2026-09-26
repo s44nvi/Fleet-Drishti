@@ -20,30 +20,70 @@ export interface Route {
   networkSource: "GTFS_BEST" | "SIMULATED";
 }
 
-// A real BEST bus stop from the public GTFS feed — static network
-// reference data, not a live arrival/departure signal.
+// A transit operator from the GTFS feed's agency.txt (BEST, TMT, KDMT, VVMT).
+export interface TransitAgency {
+  agencyId: string;
+  name: string;
+  url: string | null;
+  routes: number;
+  trips: number;
+  stops: number;
+}
+
+// A real bus stop from the public GTFS feed (any operator) — static network
+// reference data, not a live arrival/departure signal. `tier` is derived at
+// build time from how many routes serve the stop (1 = interchange hub,
+// 2 = busy stop, 3 = local stop) and only drives zoom-dependent display.
 export interface TransitStop {
   stopId: string;
   name: string;
   latitude: number;
   longitude: number;
-  area: string | null;
-  source: "GTFS_BEST";
+  agencyIds: string[];
+  routeCount: number;
+  tier: 1 | 2 | 3;
+  source: "GTFS";
 }
 
-// One route+direction's approximate path, derived from the public GTFS feed
-// by connecting that direction's real stops in their recorded stop_sequence
-// order (see scripts/ingest-gtfs.mjs). The feed has no shapes.txt, so this
-// is never official route geometry — `geometryType` makes that explicit so
-// any consumer (map popup, future export, etc.) can carry the disclaimer
-// forward instead of re-deriving it. A `gtfsRouteId` can appear on more than
-// one NetworkRouteLine (one per direction).
+// How a route line's geometry was derived. The feed has no shapes.txt, so
+// neither is official route geometry:
+//  road_snapped             BEST — OSRM road-snapped path validated against
+//                           the trip's real stops (detour legs replaced by
+//                           straight connectors; see `repairedLegs`)
+//  approximate_stop_sequence  the trip's real stops joined in order
+export type RouteGeometrySource = "road_snapped" | "approximate_stop_sequence";
+
+// One route+direction's path (see scripts/ingest-gtfs.mjs). A `gtfsRouteId`
+// can appear on more than one NetworkRouteLine (one per direction).
 export interface NetworkRouteLine {
   gtfsRouteId: string;
+  agencyId: string;
   directionId: number;
   shortName: string;
   longName: string;
+  stopCount: number;
+  /** Real first / last stop of this direction (GTFS). route_long_name's
+   * "A ⇆ B" order says nothing about direction — these do. */
+  fromStop: string;
+  toStop: string;
   distanceKm: number;
-  geometryType: "approximate_stop_sequence";
+  geometryType: RouteGeometrySource;
+  /** Stop-to-stop legs drawn straight because the road path was a routing artefact. */
+  repairedLegs: number;
   geometry: { type: "LineString"; coordinates: [number, number][] };
+}
+
+// Per-route GTFS facts for search, popups and route context.
+export interface TransitRouteSummary {
+  gtfsRouteId: string;
+  agencyId: string;
+  shortName: string;
+  longName: string;
+  tripCount: number;
+  stopsServed: number;
+  directions: number;
+  geometryType: RouteGeometrySource | null;
+  distanceKm: number | null;
+  /** [west, south, east, north] */
+  bbox: [number, number, number, number] | null;
 }

@@ -46,6 +46,14 @@ export interface MapMarker {
   /** Observed within the last 5 minutes of the dataset anchor — draws a
    * single recency ring. */
   recent?: boolean;
+  /** Bus markers: where the position comes from. SIMULATED = the fixture
+   * fleet; DEMO = the density layer placed on GTFS routes. Never GPS. */
+  positionSource?: "SIMULATED" | "DEMO";
+  /** GTFS route this bus runs, for route highlighting and route popups. */
+  gtfsRouteId?: string;
+  /** Leave out of the initial "fit to markers" framing (density layers
+   * shouldn't widen the view to the whole region). */
+  excludeFromFit?: boolean;
 }
 
 export interface NavLeafItem {

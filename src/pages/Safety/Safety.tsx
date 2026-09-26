@@ -35,6 +35,7 @@ export function Safety() {
   const { data: issues } = useAsyncData(() => issueService.listIssues(), []);
   const { data: events } = useAsyncData(() => eventService.listEvents(), []);
   const { data: networkRouteLines } = useAsyncData(() => routeService.listNetworkRouteLines(), []);
+  const { data: networkStops } = useAsyncData(() => routeService.listNetworkStops(), []);
 
   const [category, setCategory] = useState<CategoryFilter>("All");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -76,6 +77,8 @@ export function Safety() {
     <>
       <PageHeader
         title="Safety"
+        subtitle="Monitor pedestrian risks, vehicle incidents, and safety observations."
+        banner
         context={
           <>
             <span className="tabular-nums">
@@ -88,12 +91,15 @@ export function Safety() {
 
       <FilterChips categories={SAFETY_EVENT_CATEGORIES} active={category} onChange={setCategory} counts={counts} />
 
-      <section className="grid grid-cols-1 xl:grid-cols-12 gap-4 xl:h-[calc(100dvh-13rem)] xl:min-h-[560px]">
+      <section className="grid grid-cols-1 xl:grid-cols-12 gap-4 xl:h-[calc(100dvh-19rem)] xl:min-h-[560px]">
         <GISMap
           className="xl:col-span-7 h-[460px] xl:h-full"
           ariaLabel="Safety risk map"
           markers={markers}
           routeLines={networkRouteLines ?? []}
+          stops={networkStops ?? []}
+          initialShowRoutes={false}
+          initialShowStops={false}
           heatmap={{ points: heatPoints, label: "Risk density" }}
           selectedId={selectedId}
           hoveredId={hoveredId}

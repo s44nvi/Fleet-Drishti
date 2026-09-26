@@ -15,24 +15,30 @@ import {
   Maximize2,
   Minus,
   Plus,
+  Search,
   ShieldAlert,
   TrafficCone,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "../../lib/cn";
+import { RouteCallout } from "./MapCallouts";
 import {
+  AGENCY_ROUTE_COLORS,
+  DEFAULT_ROUTE_COLOR,
   DEFAULT_ZOOM,
   LIGHT_VECTOR_STYLE_URL,
   MAX_ZOOM,
   MIN_ZOOM,
   MUMBAI_METROPOLITAN_CENTER,
   NETWORK_ROUTES_ZOOM_STOPS,
-  NETWORK_STOPS_MIN_ZOOM,
   OSM_RASTER_STYLE,
+  STOP_LABEL_MIN_ZOOM,
+  STOP_TIER_MIN_ZOOM,
 } from "../../lib/gisConfig";
-import { gtfsSourceInfo } from "../../lib/gtfs/adapter";
+import { gtfsAgencies } from "../../lib/gtfs/adapter";
+import { routeService } from "../../services/routeService";
 import { SEVERITY_TONE, TONE_CLASSES, TONE_HEX, categoryVisual, type Tone } from "../../lib/visuals";
-import type { MapMarker, MapMarkerKind, NetworkRouteLine, TransitStop } from "../../types";
+import type { MapMarker, MapMarkerKind, NetworkRouteLine, TransitRouteSummary, TransitStop } from "../../types";
 
 export interface CongestionSegment {
   coordinates: [number, number][];
@@ -68,13 +74,27 @@ export interface HeatPoint {
 
 interface GISMapProps {
   markers: MapMarker[];
-  /** Real BEST stop network (GTFS) — zoom-gated reference layer. */
+  /** Real GTFS stop network, all operators — zoom-gated by stop tier. */
   stops?: TransitStop[];
-  /** Real BEST route paths (approximate, stop-sequence derived). */
+  /** Real GTFS route paths, all operators (road-snapped BEST, schematic others). */
   routeLines?: NetworkRouteLine[];
   /** BEST route short name ("9") to highlight in both directions; the map
    * fits to it when it changes. */
   highlightRoute?: string | null;
+  /** Any operator's route to highlight by GTFS route_id (e.g. a demo bus's
+   * route); takes precedence over `highlightRoute`. Fits to it on change. */
+  highlightRouteId?: string | null;
+  /** Start with the stop layer hidden (it stays in the layer panel). */
+  initialShowStops?: boolean;
+  /** Adds route search (number / terminal name) to the layer panel. */
+  routeSearch?: boolean;
+  /** Content for a compact callout pinned to the selected marker (e.g. bus
+   * details). Return null for markers the page handles another way; `close`
+   * clears the selection. */
+  markerPopup?: (marker: MapMarker, close: () => void) => ReactNode | null;
+  /** Fit the view to a page-highlighted route (default). Off to highlight
+   * a selected bus's route without re-framing the map. */
+  fitHighlightedRoute?: boolean;
   /** List ↔ map: the selected marker flies into view and gets a halo. */
   selectedId?: string | null;
   /** List ↔ map: hovering a list row lifts its marker. */
@@ -115,10 +135,13 @@ interface GISMapProps {
 }
 
 const NETWORK_STOPS_SOURCE_ID = "fd-network-stops";
-const NETWORK_STOPS_LAYER_ID = "fd-network-stops-layer";
 const NETWORK_ROUTES_SOURCE_ID = "fd-network-routes";
 const NETWORK_ROUTES_LAYER_ID = "fd-network-routes-layer";
+const NETWORK_ROUTES_SCHEMATIC_LAYER_ID = "fd-network-routes-schematic";
 const NETWORK_ROUTES_HIGHLIGHT_LAYER_ID = "fd-network-routes-highlight";
+const ROUTE_LAYER_IDS = [NETWORK_ROUTES_LAYER_ID, NETWORK_ROUTES_SCHEMATIC_LAYER_ID];
+const STOP_LAYER_IDS = ["fd-stops-tier1", "fd-stops-tier2", "fd-stops-tier3"] as const;
+const STOP_LABEL_LAYER_ID = "fd-stops-labels";
 const HEAT_SOURCE_ID = "fd-heat";
 const HEAT_LAYER_ID = "fd-heat-layer";
 const RASTER_SOURCE_ID = "fd-raster";
@@ -176,11 +199,17 @@ function segmentsToGeoJSON(segments: CongestionSegment[]): GeoJSON.FeatureCollec
 }
 const NONE = "__none__";
 
-const NETWORK_COLOR = "#8fa3bf";
+const NETWORK_COLOR = DEFAULT_ROUTE_COLOR;
 const NETWORK_HIGHLIGHT_COLOR = TONE_HEX.action;
+const AGENCY_COLOR_EXPR: maplibregl.ExpressionSpecification = [
+  "match",
+  ["get", "agencyId"],
+  ...Object.entries(AGENCY_ROUTE_COLORS).flat(),
+  DEFAULT_ROUTE_COLOR,
+] as unknown as maplibregl.ExpressionSpecification;
 
 const KIND_META: Record<MapMarkerKind, { label: string; icon: LucideIcon; tone: Tone; category: string }> = {
-  "bus-probe": { label: "Buses", icon: Bus, tone: "ok", category: "bus" },
+  "bus-probe": { label: "Sensing buses", icon: Bus, tone: "ok", category: "bus" },
   "critical-distress": { label: "Road issues", icon: Construction, tone: "alert", category: "pothole" },
   "traffic-chokepoint": { label: "Traffic", icon: TrafficCone, tone: "watch", category: "congestion" },
   "vulnerable-crossing": { label: "Safety", icon: ShieldAlert, tone: "safety", category: "pedestrian-conflict" },
@@ -209,7 +238,7 @@ function stopsToGeoJSON(stops: TransitStop[]): GeoJSON.FeatureCollection {
     features: stops.map((stop) => ({
       type: "Feature",
       geometry: { type: "Point", coordinates: [stop.longitude, stop.latitude] },
-      properties: { name: stop.name },
+      properties: { name: stop.name, agencies: stop.agencyIds.join(" · "), routes: stop.routeCount, tier: stop.tier },
     })),
   };
 }
@@ -222,12 +251,30 @@ function routeLinesToGeoJSON(lines: NetworkRouteLine[]): GeoJSON.FeatureCollecti
       geometry: line.geometry,
       properties: {
         gtfsRouteId: line.gtfsRouteId,
+        agencyId: line.agencyId,
         shortName: line.shortName,
         longName: line.longName,
+        fromStop: line.fromStop,
+        toStop: line.toStop,
         distanceKm: line.distanceKm,
+        geometryType: line.geometryType,
+        repairedLegs: line.repairedLegs,
       },
     })),
   };
+}
+
+// The route the viewer opened (by clicking a line or via search).
+interface SelectedRoute {
+  gtfsRouteId: string;
+  agencyId: string;
+  shortName: string;
+  longName: string;
+  fromStop: string;
+  toStop: string;
+  geometryType: NetworkRouteLine["geometryType"];
+  repairedLegs: number;
+  lngLat: [number, number];
 }
 
 function heatToGeoJSON(points: HeatPoint[]): GeoJSON.FeatureCollection {
@@ -285,19 +332,19 @@ function tooltipNode(title: string, detail?: string): HTMLElement {
   return root;
 }
 
-function routePopupNode(props: { shortName: string; longName: string; distanceKm: number }): HTMLElement {
+function stopPopupNode(props: { name: string; agencies: string; routes: number }): HTMLElement {
   const root = document.createElement("div");
   root.className = "text-body text-ink max-w-[240px]";
   const title = document.createElement("p");
   title.className = "text-item";
-  title.textContent = `BEST route ${props.shortName}`;
-  const name = document.createElement("p");
-  name.className = "text-meta text-ink-2 mt-0.5";
-  name.textContent = props.longName;
+  title.textContent = props.name;
+  const sub = document.createElement("p");
+  sub.className = "text-meta text-ink-2 mt-0.5";
+  sub.textContent = `${props.agencies} · served by ${props.routes} route${props.routes === 1 ? "" : "s"}`;
   const note = document.createElement("p");
   note.className = "text-meta text-ink-3 mt-1.5";
-  note.textContent = `≈ ${props.distanceKm} km · approximate path from stop sequence · community GTFS feed (${gtfsSourceInfo.repository.replace("https://github.com/", "")}), not an official BEST publication`;
-  root.append(title, name, note);
+  note.textContent = "GTFS stop (scheduled network) — not a live arrivals feed";
+  root.append(title, sub, note);
   return root;
 }
 
@@ -305,7 +352,8 @@ function MarkerGlyph({ marker, selected, hovered }: { marker: MapMarker; selecte
   const tone = markerTone(marker);
   const Icon = categoryVisual(marker.category ?? KIND_META[marker.kind].category).icon;
   const isBus = marker.kind === "bus-probe";
-  const size = selected ? 32 : 26;
+  const isDemo = marker.positionSource === "DEMO";
+  const size = selected ? 32 : isDemo ? 22 : 26;
   return (
     <span
       className={cn(
@@ -325,9 +373,58 @@ function MarkerGlyph({ marker, selected, hovered }: { marker: MapMarker; selecte
           selected && "ring-4 ring-action/35",
         )}
       >
-        <Icon size={selected ? 17 : 14} strokeWidth={2.25} aria-hidden="true" />
+        <Icon size={selected ? 17 : isDemo ? 12 : 14} strokeWidth={2.25} aria-hidden="true" />
       </span>
     </span>
+  );
+}
+
+function RouteSearch({
+  query,
+  onQuery,
+  results,
+  loading,
+  onPick,
+}: {
+  query: string;
+  onQuery: (q: string) => void;
+  results: TransitRouteSummary[];
+  loading: boolean;
+  onPick: (r: TransitRouteSummary) => void;
+}) {
+  return (
+    <div className="mb-1.5 border-b border-line pb-2">
+      <label className="relative block">
+        <span className="sr-only">Find a route by number or terminal</span>
+        <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-3" aria-hidden="true" />
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => onQuery(e.target.value)}
+          placeholder="Route no. or terminal"
+          className="h-8 w-full rounded-md border border-line-strong bg-surface pl-8 pr-2 text-meta text-ink placeholder:text-ink-3"
+        />
+      </label>
+      {query && (
+        <ul className="mt-1 flex flex-col" aria-label="Matching routes">
+          {loading && <li className="px-1 py-1.5 text-micro text-ink-3">Loading routes…</li>}
+          {!loading && results.length === 0 && <li className="px-1 py-1.5 text-micro text-ink-3">No route with drawn geometry matches</li>}
+          {results.map((r) => (
+            <li key={r.gtfsRouteId}>
+              <button type="button" onClick={() => onPick(r)} className="w-full rounded-md px-1.5 py-1 text-left hover:bg-surface-2">
+                <span className="flex items-center gap-1.5 text-meta text-ink">
+                  <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: AGENCY_ROUTE_COLORS[r.agencyId] ?? NETWORK_COLOR }} aria-hidden="true" />
+                  <span className="font-semibold">
+                    {r.agencyId} {r.shortName}
+                  </span>
+                </span>
+                <span className="block truncate text-micro text-ink-3">{r.longName}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
@@ -379,6 +476,11 @@ export function GISMap({
   stops = [],
   routeLines = [],
   highlightRoute = null,
+  highlightRouteId = null,
+  initialShowStops = true,
+  routeSearch = false,
+  markerPopup,
+  fitHighlightedRoute = true,
   selectedId = null,
   hoveredId = null,
   onSelect,
@@ -418,7 +520,10 @@ export function GISMap({
   const rasterRef = useRef(rasterOverlay);
   const calloutMarkersRef = useRef<Map<string, { marker: MapLibreMarker; el: HTMLDivElement }>>(new Map());
   const selectedRouteIdRef = useRef<string | null>(null);
+  const highlightFilterRef = useRef<(hoverRouteId?: string) => maplibregl.FilterSpecification>(() => ["==", ["get", "gtfsRouteId"], NONE]);
+  const openRouteRef = useRef<(route: SelectedRoute | null) => void>(() => {});
   const highlightRouteRef = useRef(highlightRoute);
+  const highlightRouteIdRef = useRef(highlightRouteId);
   onSelectRef.current = onSelect;
   navigateRef.current = navigate;
   stopsRef.current = stops;
@@ -428,13 +533,42 @@ export function GISMap({
   segmentsRef.current = congestionSegments ?? [];
   rasterRef.current = rasterOverlay;
   highlightRouteRef.current = highlightRoute;
+  highlightRouteIdRef.current = highlightRouteId;
 
   const [styleReady, setStyleReady] = useState(0);
   const [panelOpen, setPanelOpen] = useState(true);
   const [hiddenKinds, setHiddenKinds] = useState<Set<MapMarkerKind>>(new Set());
-  const [showRoutes, setShowRoutes] = useState(initialShowRoutes);
-  const [showStops, setShowStops] = useState(true);
+  // Route visibility per operator. `null` = the page asked for routes to
+  // start hidden, before the operator list is known.
+  const [hiddenAgencies, setHiddenAgencies] = useState<Set<string> | null>(initialShowRoutes ? new Set() : null);
+  const [showStops, setShowStops] = useState(initialShowStops);
   const [showHeat, setShowHeat] = useState(true);
+  const [selectedRoute, setSelectedRoute] = useState<SelectedRoute | null>(null);
+  const [routeIndex, setRouteIndex] = useState<TransitRouteSummary[] | null>(null);
+  const [routeQuery, setRouteQuery] = useState("");
+  // Popup bodies are React portals into these stable elements.
+  const [routePopupEl] = useState(() => document.createElement("div"));
+  const [markerPopupEl] = useState(() => document.createElement("div"));
+  const routePopupRef = useRef<{ popup: maplibregl.Popup } | null>(null);
+  const markerPopupRef = useRef<{ popup: maplibregl.Popup; silent: boolean } | null>(null);
+
+  // Operators present in the route data, in feed order, with route counts.
+  const agencyRouteCounts = useMemo(() => {
+    const byAgency = new Map<string, Set<string>>();
+    for (const l of routeLines) {
+      let set = byAgency.get(l.agencyId);
+      if (!set) byAgency.set(l.agencyId, (set = new Set()));
+      set.add(l.gtfsRouteId);
+    }
+    // BEST (the city operator) first, then agency.txt order.
+    const rank = (id: string) => (id === "BEST" ? -1 : gtfsAgencies.findIndex((a) => a.agencyId === id));
+    return [...byAgency.entries()]
+      .sort(([a], [b]) => rank(a) - rank(b))
+      .map(([agencyId, set]) => ({ agencyId, routes: set.size }));
+  }, [routeLines]);
+  const allAgencyIds = useMemo(() => agencyRouteCounts.map((a) => a.agencyId), [agencyRouteCounts]);
+  const hidden = hiddenAgencies ?? new Set(allAgencyIds);
+  const anyRoutesVisible = allAgencyIds.some((id) => !hidden.has(id));
 
   const kindCounts = useMemo(() => {
     const counts = new Map<MapMarkerKind, number>();
@@ -456,7 +590,8 @@ export function GISMap({
     return el;
   }
 
-  function fitMarkers(map: MapLibreMap, list: MapMarker[], animate: boolean) {
+  function fitMarkers(map: MapLibreMap, all: MapMarker[], animate: boolean) {
+    const list = all.filter((m) => !m.excludeFromFit);
     if (list.length === 0) {
       map.jumpTo({ center: MUMBAI_METROPOLITAN_CENTER, zoom: DEFAULT_ZOOM });
       return;
@@ -492,7 +627,6 @@ export function GISMap({
       className: "fd-map-tooltip",
       maxWidth: "260px",
     });
-    let routePopup: maplibregl.Popup | null = null;
 
     // Fall back to raster tiles if the vector style itself can't load.
     let styleLoadedOnce = false;
@@ -525,29 +659,54 @@ export function GISMap({
       }
       if (!map.getSource(NETWORK_ROUTES_SOURCE_ID)) {
         map.addSource(NETWORK_ROUTES_SOURCE_ID, { type: "geojson", data: routeLinesToGeoJSON(routeLinesRef.current) });
+        // Thin, agency-tinted, low-opacity context: dense corridors emerge
+        // where many routes overlap, without drowning the markers.
+        const width: maplibregl.ExpressionSpecification = [
+          "interpolate", ["linear"], ["zoom"],
+          NETWORK_ROUTES_ZOOM_STOPS.faint, 0.5,
+          NETWORK_ROUTES_ZOOM_STOPS.cityView, 0.8,
+          NETWORK_ROUTES_ZOOM_STOPS.midZoom, 1.2,
+          NETWORK_ROUTES_ZOOM_STOPS.closeZoom, 1.6,
+          NETWORK_ROUTES_ZOOM_STOPS.fullDetail, 2.2,
+        ];
+        const opacity: maplibregl.ExpressionSpecification = [
+          "interpolate", ["linear"], ["zoom"],
+          NETWORK_ROUTES_ZOOM_STOPS.faint, 0.1,
+          NETWORK_ROUTES_ZOOM_STOPS.cityView, 0.2,
+          NETWORK_ROUTES_ZOOM_STOPS.midZoom, 0.38,
+          NETWORK_ROUTES_ZOOM_STOPS.closeZoom, 0.7,
+          NETWORK_ROUTES_ZOOM_STOPS.fullDetail, 0.85,
+        ];
         map.addLayer({
           id: NETWORK_ROUTES_LAYER_ID,
           type: "line",
           source: NETWORK_ROUTES_SOURCE_ID,
+          filter: ["==", ["get", "geometryType"], "road_snapped"],
           layout: { "line-cap": "round", "line-join": "round" },
+          paint: { "line-color": AGENCY_COLOR_EXPR, "line-width": width, "line-opacity": opacity },
+        });
+        // Schematic (stop-sequence) lines are dashed so they never read as
+        // real road geometry.
+        map.addLayer({
+          id: NETWORK_ROUTES_SCHEMATIC_LAYER_ID,
+          type: "line",
+          source: NETWORK_ROUTES_SOURCE_ID,
+          filter: ["==", ["get", "geometryType"], "approximate_stop_sequence"],
+          layout: { "line-join": "round" },
+          // Dimmer than road geometry: overlapping straight stop-to-stop
+          // legs read as clutter much faster than real road paths do.
           paint: {
-            "line-color": NETWORK_COLOR,
-            "line-width": [
-              "interpolate", ["linear"], ["zoom"],
-              NETWORK_ROUTES_ZOOM_STOPS.faint, 0.5,
-              NETWORK_ROUTES_ZOOM_STOPS.cityView, 0.8,
-              NETWORK_ROUTES_ZOOM_STOPS.midZoom, 1.2,
-              NETWORK_ROUTES_ZOOM_STOPS.closeZoom, 1.6,
-              NETWORK_ROUTES_ZOOM_STOPS.fullDetail, 2.2,
-            ],
+            "line-color": AGENCY_COLOR_EXPR,
+            "line-width": width,
             "line-opacity": [
               "interpolate", ["linear"], ["zoom"],
-              NETWORK_ROUTES_ZOOM_STOPS.faint, 0.06,
-              NETWORK_ROUTES_ZOOM_STOPS.cityView, 0.12,
-              NETWORK_ROUTES_ZOOM_STOPS.midZoom, 0.35,
-              NETWORK_ROUTES_ZOOM_STOPS.closeZoom, 0.7,
-              NETWORK_ROUTES_ZOOM_STOPS.fullDetail, 0.85,
+              NETWORK_ROUTES_ZOOM_STOPS.faint, 0.07,
+              NETWORK_ROUTES_ZOOM_STOPS.cityView, 0.13,
+              NETWORK_ROUTES_ZOOM_STOPS.midZoom, 0.25,
+              NETWORK_ROUTES_ZOOM_STOPS.closeZoom, 0.45,
+              NETWORK_ROUTES_ZOOM_STOPS.fullDetail, 0.55,
             ],
+            "line-dasharray": [2, 1.5],
           },
         });
         map.addLayer({
@@ -600,56 +759,125 @@ export function GISMap({
       }
       if (!map.getSource(NETWORK_STOPS_SOURCE_ID)) {
         map.addSource(NETWORK_STOPS_SOURCE_ID, { type: "geojson", data: stopsToGeoJSON(stopsRef.current) });
-        map.addLayer({
-          id: NETWORK_STOPS_LAYER_ID,
-          type: "circle",
-          source: NETWORK_STOPS_SOURCE_ID,
-          minzoom: NETWORK_STOPS_MIN_ZOOM,
-          paint: {
-            "circle-radius": 2.5,
-            "circle-color": "#ffffff",
-            "circle-stroke-width": 1.25,
-            "circle-stroke-color": NETWORK_COLOR,
-          },
+        // Hubs city-wide, busy stops mid zoom, every stop close in.
+        ([1, 2, 3] as const).forEach((tier, i) => {
+          map.addLayer({
+            id: STOP_LAYER_IDS[i],
+            type: "circle",
+            source: NETWORK_STOPS_SOURCE_ID,
+            minzoom: STOP_TIER_MIN_ZOOM[tier],
+            filter: ["==", ["get", "tier"], tier],
+            paint: {
+              "circle-radius": ["interpolate", ["linear"], ["zoom"], 10, tier === 1 ? 2.2 : 1.6, 15, tier === 1 ? 4 : 3],
+              "circle-color": "#ffffff",
+              "circle-stroke-width": tier === 1 ? 1.4 : 1,
+              "circle-stroke-color": NETWORK_COLOR,
+              "circle-stroke-opacity": ["interpolate", ["linear"], ["zoom"], 10, 0.7, 14, 1],
+            },
+          });
         });
+        // Names only close in — and only when the basemap ships glyphs
+        // (the raster fallback style doesn't).
+        if (map.getStyle().glyphs) {
+          map.addLayer({
+            id: STOP_LABEL_LAYER_ID,
+            type: "symbol",
+            source: NETWORK_STOPS_SOURCE_ID,
+            minzoom: STOP_LABEL_MIN_ZOOM,
+            layout: {
+              "text-field": ["get", "name"],
+              "text-font": ["Noto Sans Regular"],
+              "text-size": 10.5,
+              "text-offset": [0, 0.9],
+              "text-anchor": "top",
+              "text-max-width": 9,
+              "text-optional": true,
+            },
+            paint: { "text-color": "#475467", "text-halo-color": "#ffffff", "text-halo-width": 1.2 },
+          });
+        }
       }
       setStyleReady((n) => n + 1);
     }
     map.on("style.load", installLayers);
 
-    // The highlighted route: the one passed by the page, otherwise whichever
-    // the viewer clicked, otherwise nothing.
-    function highlightFilter(hoverShortName?: string): maplibregl.FilterSpecification {
-      if (hoverShortName) return ["==", ["get", "shortName"], hoverShortName];
-      if (highlightRouteRef.current) return ["==", ["get", "shortName"], highlightRouteRef.current];
+    // The highlighted route: hovered, else the page's (a BEST short name),
+    // else whichever the viewer opened, else nothing. Matched by route id so
+    // both directions light up and same-numbered routes of other operators
+    // don't.
+    function highlightFilter(hoverRouteId?: string): maplibregl.FilterSpecification {
+      if (hoverRouteId) return ["==", ["get", "gtfsRouteId"], hoverRouteId];
+      if (highlightRouteIdRef.current) return ["==", ["get", "gtfsRouteId"], highlightRouteIdRef.current];
+      if (highlightRouteRef.current) {
+        return ["all", ["==", ["get", "agencyId"], "BEST"], ["==", ["get", "shortName"], highlightRouteRef.current]];
+      }
       return ["==", ["get", "gtfsRouteId"], selectedRouteIdRef.current ?? NONE];
     }
+    highlightFilterRef.current = highlightFilter;
 
-    map.on("mouseenter", NETWORK_ROUTES_LAYER_ID, () => {
-      map.getCanvas().style.cursor = "pointer";
+    for (const layerId of ROUTE_LAYER_IDS) {
+      map.on("mouseenter", layerId, () => {
+        map.getCanvas().style.cursor = "pointer";
+      });
+      map.on("mousemove", layerId, (e: MapLayerMouseEvent) => {
+        const props = e.features?.[0]?.properties;
+        if (!props) return;
+        map.setFilter(NETWORK_ROUTES_HIGHLIGHT_LAYER_ID, highlightFilter(props.gtfsRouteId));
+        tooltipRef.current?.setLngLat(e.lngLat).setDOMContent(tooltipNode(`${props.agencyId} · Route ${props.shortName}`, props.longName)).addTo(map);
+      });
+      map.on("mouseleave", layerId, () => {
+        map.getCanvas().style.cursor = "";
+        tooltipRef.current?.remove();
+        map.setFilter(NETWORK_ROUTES_HIGHLIGHT_LAYER_ID, highlightFilter());
+      });
+      map.on("click", layerId, (e: MapLayerMouseEvent) => {
+        const props = e.features?.[0]?.properties;
+        if (!props) return;
+        openRouteRef.current({
+          gtfsRouteId: props.gtfsRouteId,
+          agencyId: props.agencyId,
+          shortName: props.shortName,
+          longName: props.longName,
+          fromStop: props.fromStop,
+          toStop: props.toStop,
+          geometryType: props.geometryType,
+          repairedLegs: Number(props.repairedLegs) || 0,
+          lngLat: [e.lngLat.lng, e.lngLat.lat],
+        });
+      });
+    }
+
+    // A click on empty map (no route or stop under it) dismisses callouts.
+    // Marker clicks never get here — markers stop propagation.
+    map.on("click", (e) => {
+      const interactive = [...ROUTE_LAYER_IDS, ...STOP_LAYER_IDS].filter((id) => map.getLayer(id));
+      if (map.queryRenderedFeatures(e.point, { layers: interactive }).length > 0) return;
+      openRouteRef.current(null);
+      if (markerPopupRef.current?.popup.isOpen()) onSelectRef.current?.(null);
     });
-    map.on("mousemove", NETWORK_ROUTES_LAYER_ID, (e: MapLayerMouseEvent) => {
-      const props = e.features?.[0]?.properties;
-      if (!props) return;
-      map.setFilter(NETWORK_ROUTES_HIGHLIGHT_LAYER_ID, highlightFilter(props.shortName));
-      tooltipRef.current?.setLngLat(e.lngLat).setDOMContent(tooltipNode(`BEST route ${props.shortName}`)).addTo(map);
-    });
-    map.on("mouseleave", NETWORK_ROUTES_LAYER_ID, () => {
-      map.getCanvas().style.cursor = "";
-      tooltipRef.current?.remove();
-      map.setFilter(NETWORK_ROUTES_HIGHLIGHT_LAYER_ID, highlightFilter());
-    });
-    map.on("click", NETWORK_ROUTES_LAYER_ID, (e: MapLayerMouseEvent) => {
-      const props = e.features?.[0]?.properties;
-      if (!props) return;
-      selectedRouteIdRef.current = props.gtfsRouteId;
-      map.setFilter(NETWORK_ROUTES_HIGHLIGHT_LAYER_ID, highlightFilter());
-      routePopup?.remove();
-      routePopup = new maplibregl.Popup({ className: "fd-map-popup", maxWidth: "280px" })
-        .setLngLat(e.lngLat)
-        .setDOMContent(routePopupNode({ shortName: props.shortName, longName: props.longName, distanceKm: props.distanceKm }))
-        .addTo(map);
-    });
+
+    let stopPopup: maplibregl.Popup | null = null;
+    for (const layerId of STOP_LAYER_IDS) {
+      map.on("mouseenter", layerId, (e: MapLayerMouseEvent) => {
+        map.getCanvas().style.cursor = "pointer";
+        const props = e.features?.[0]?.properties;
+        if (props) tooltipRef.current?.setLngLat(e.lngLat).setDOMContent(tooltipNode(props.name, props.agencies)).addTo(map);
+      });
+      map.on("mouseleave", layerId, () => {
+        map.getCanvas().style.cursor = "";
+        tooltipRef.current?.remove();
+      });
+      map.on("click", layerId, (e: MapLayerMouseEvent) => {
+        const f = e.features?.[0];
+        if (!f) return;
+        const [lng, lat] = (f.geometry as GeoJSON.Point).coordinates;
+        stopPopup?.remove();
+        stopPopup = new maplibregl.Popup({ className: "fd-map-popup", maxWidth: "260px" })
+          .setLngLat([lng, lat])
+          .setDOMContent(stopPopupNode({ name: f.properties.name, agencies: f.properties.agencies, routes: Number(f.properties.routes) }))
+          .addTo(map);
+      });
+    }
 
     // maplibre-gl.css forces `.maplibregl-map { position: relative }`, which
     // defeats percentage sizing in some layouts — size from the wrapper box.
@@ -673,7 +901,12 @@ export function GISMap({
     return () => {
       resizeObserver.disconnect();
       tooltipRef.current?.remove();
-      routePopup?.remove();
+      stopPopup?.remove();
+      routePopupRef.current?.popup.remove();
+      if (markerPopupRef.current) {
+        markerPopupRef.current.silent = true;
+        markerPopupRef.current.popup.remove();
+      }
       instances.forEach((m) => m.remove());
       instances.clear();
       map.remove();
@@ -734,30 +967,103 @@ export function GISMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [calloutSignature, styleReady]);
 
-  // Layer visibility toggles.
+  // Layer visibility: routes per operator, stops, heat layers.
+  const hiddenKey = [...hidden].sort().join(",");
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
     const set = (id: string, on: boolean) => map.getLayer(id) && map.setLayoutProperty(id, "visibility", on ? "visible" : "none");
-    set(NETWORK_ROUTES_LAYER_ID, showRoutes);
-    set(NETWORK_ROUTES_HIGHLIGHT_LAYER_ID, showRoutes || Boolean(highlightRoute));
-    set(NETWORK_STOPS_LAYER_ID, showStops);
+    const hiddenIds = hiddenKey ? hiddenKey.split(",") : [];
+    for (const id of ROUTE_LAYER_IDS) {
+      set(id, anyRoutesVisible);
+      if (map.getLayer(id)) {
+        const geometry = id === NETWORK_ROUTES_LAYER_ID ? "road_snapped" : "approximate_stop_sequence";
+        map.setFilter(id, ["all", ["==", ["get", "geometryType"], geometry], ["!", ["in", ["get", "agencyId"], ["literal", hiddenIds]]]]);
+      }
+    }
+    set(NETWORK_ROUTES_HIGHLIGHT_LAYER_ID, true);
+    for (const id of [...STOP_LAYER_IDS, STOP_LABEL_LAYER_ID]) set(id, showStops);
     set(HEAT_LAYER_ID, showHeat && Boolean(heatmap));
     set(RASTER_LAYER_ID, showHeat && Boolean(rasterOverlay));
     set(CONGESTION_CASING_LAYER_ID, showHeat && Boolean(congestionSegments?.length));
     set(CONGESTION_LAYER_ID, showHeat && Boolean(congestionSegments?.length));
-  }, [showRoutes, showStops, showHeat, heatmap, rasterOverlay, congestionSegments, highlightRoute, styleReady]);
+  }, [hiddenKey, anyRoutesVisible, showStops, showHeat, heatmap, rasterOverlay, congestionSegments, styleReady]);
+
+  // Opening a route (line click or search): highlight both directions and
+  // pin the route card. Route facts load once, on first use.
+  openRouteRef.current = (route) => {
+    selectedRouteIdRef.current = route?.gtfsRouteId ?? null;
+    setSelectedRoute(route);
+    const map = mapRef.current;
+    if (map?.getLayer(NETWORK_ROUTES_HIGHLIGHT_LAYER_ID)) map.setFilter(NETWORK_ROUTES_HIGHLIGHT_LAYER_ID, highlightFilterRef.current());
+  };
+  useEffect(() => {
+    if ((selectedRoute || routeQuery) && !routeIndex) routeService.listRouteIndex().then(setRouteIndex).catch(() => undefined);
+  }, [selectedRoute, routeQuery, routeIndex]);
+
+  // Route card popup — a MapLibre popup whose body is a React portal.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (!selectedRoute) {
+      routePopupRef.current?.popup.remove();
+      return;
+    }
+    if (!routePopupRef.current) {
+      const popup = new maplibregl.Popup({ className: "fd-map-popup", maxWidth: "280px", closeButton: false, closeOnClick: false });
+      popup.setDOMContent(routePopupEl);
+      routePopupRef.current = { popup };
+    }
+    const { popup } = routePopupRef.current;
+    popup.setLngLat(selectedRoute.lngLat);
+    // Never show an empty box: only open once the callout has rendered.
+    if (!popup.isOpen() && routePopupEl.childElementCount > 0) popup.addTo(map);
+  }, [selectedRoute, routePopupEl]);
+
+  // Marker popup (e.g. bus details) pinned to the selected marker.
+  const selectedMarker = selectedId ? markers.find((m) => m.id === selectedId) : undefined;
+  const markerPopupContent = selectedMarker && markerPopup ? markerPopup(selectedMarker, () => onSelectRef.current?.(null)) : null;
+  const markerPopupAt = markerPopupContent && selectedMarker ? `${selectedMarker.longitude},${selectedMarker.latitude}` : null;
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (!markerPopupAt) {
+      const entry = markerPopupRef.current;
+      if (entry?.popup.isOpen()) {
+        entry.silent = true; // programmatic: keep the page's selection
+        entry.popup.remove();
+        entry.silent = false;
+      }
+      return;
+    }
+    if (!markerPopupRef.current) {
+      const popup = new maplibregl.Popup({ className: "fd-map-popup", maxWidth: "280px", offset: 20, closeButton: false, closeOnClick: false });
+      popup.setDOMContent(markerPopupEl);
+      popup.on("close", () => {
+        if (!markerPopupRef.current?.silent) onSelectRef.current?.(null);
+      });
+      markerPopupRef.current = { popup, silent: false };
+    }
+    const [lng, lat] = markerPopupAt.split(",").map(Number);
+    const { popup } = markerPopupRef.current;
+    popup.setLngLat([lng, lat]);
+    // Popup.addTo() on an open popup removes it first (firing "close"),
+    // which would clear the new selection — only add when closed. And never
+    // show an empty box: only open once the callout has rendered.
+    if (!popup.isOpen() && markerPopupEl.childElementCount > 0) popup.addTo(map);
+  }, [markerPopupAt, markerPopupEl]);
 
   // Page-driven route highlight: filter + fit to the route.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !map.getLayer(NETWORK_ROUTES_HIGHLIGHT_LAYER_ID)) return;
-    map.setFilter(
-      NETWORK_ROUTES_HIGHLIGHT_LAYER_ID,
-      highlightRoute ? ["==", ["get", "shortName"], highlightRoute] : ["==", ["get", "gtfsRouteId"], selectedRouteIdRef.current ?? NONE],
-    );
-    if (!highlightRoute) return;
-    const coords = routeLines.filter((l) => l.shortName === highlightRoute).flatMap((l) => l.geometry.coordinates);
+    map.setFilter(NETWORK_ROUTES_HIGHLIGHT_LAYER_ID, highlightFilterRef.current());
+    if ((!highlightRoute && !highlightRouteId) || !fitHighlightedRoute) return;
+    const coords = routeLines
+      .filter((l) =>
+        highlightRouteId ? l.gtfsRouteId === highlightRouteId : l.agencyId === "BEST" && l.shortName === highlightRoute,
+      )
+      .flatMap((l) => l.geometry.coordinates);
     if (coords.length === 0) return;
     const bounds = new maplibregl.LngLatBounds();
     coords.forEach((c) => bounds.extend(c));
@@ -765,7 +1071,7 @@ export function GISMap({
     const padding = drawerOpen && wide ? { top: 60, bottom: 60, left: 60, right: 400 } : 60;
     map.fitBounds(bounds, { padding, maxZoom: 14, duration: prefersReducedMotion() ? 0 : 700 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [highlightRoute, routeLines, styleReady]);
+  }, [highlightRoute, highlightRouteId, routeLines, styleReady]);
 
   // Marker instances — diffed by id. The glyph inside each element is
   // rendered by React through a portal (see return).
@@ -808,7 +1114,8 @@ export function GISMap({
       const showTip = () => {
         const current = markersByIdRef.current.get(marker.id);
         if (!current) return;
-        const detail = current.kind === "bus-probe" ? [current.detail, "Simulated position"].filter(Boolean).join(" · ") : current.detail;
+        const position = current.positionSource === "DEMO" ? "Demo position" : "Simulated position";
+        const detail = current.kind === "bus-probe" ? [current.detail, position].filter(Boolean).join(" · ") : current.detail;
         tooltipRef.current?.setLngLat([current.longitude, current.latitude]).setDOMContent(tooltipNode(current.label, detail)).addTo(map);
       };
       el.addEventListener("mouseenter", showTip);
@@ -876,6 +1183,64 @@ export function GISMap({
     return () => window.clearTimeout(timer);
   }, [fitToMarkers, markers]);
 
+  function toggleAgency(agencyId: string) {
+    setHiddenAgencies((prev) => {
+      const next = new Set(prev ?? allAgencyIds);
+      if (next.has(agencyId)) next.delete(agencyId);
+      else next.add(agencyId);
+      return next;
+    });
+  }
+
+  // Route search over the GTFS route index (routes that have geometry).
+  const searchResults = useMemo(() => {
+    const q = routeQuery.trim().toLowerCase();
+    if (!q || !routeIndex) return [];
+    const hits = routeIndex.filter(
+      (r) => r.geometryType && (r.shortName.toLowerCase().startsWith(q) || r.longName.toLowerCase().includes(q)),
+    );
+    // Exact route numbers first, then prefix matches, then name matches.
+    const score = (r: TransitRouteSummary) => (r.shortName.toLowerCase() === q ? 0 : r.shortName.toLowerCase().startsWith(q) ? 1 : 2);
+    return hits.sort((a, b) => score(a) - score(b) || a.shortName.length - b.shortName.length).slice(0, 8);
+  }, [routeQuery, routeIndex]);
+
+  function pickRoute(r: TransitRouteSummary) {
+    const map = mapRef.current;
+    const line = routeLines.find((l) => l.gtfsRouteId === r.gtfsRouteId);
+    if (!map || !line || !r.bbox) return;
+    // Turn the operator layer on so the route sits in context.
+    setHiddenAgencies((prev) => {
+      const next = new Set(prev ?? allAgencyIds);
+      next.delete(r.agencyId);
+      return next;
+    });
+    const coords = line.geometry.coordinates;
+    const mid = coords[Math.floor(coords.length / 2)];
+    openRouteRef.current({
+      gtfsRouteId: r.gtfsRouteId,
+      agencyId: r.agencyId,
+      shortName: r.shortName,
+      longName: r.longName,
+      fromStop: line.fromStop,
+      toStop: line.toStop,
+      geometryType: line.geometryType,
+      repairedLegs: line.repairedLegs,
+      lngLat: [mid[0], mid[1]],
+    });
+    map.fitBounds(
+      [
+        [r.bbox[0], r.bbox[1]],
+        [r.bbox[2], r.bbox[3]],
+      ],
+      { padding: { top: 80, bottom: 80, left: 260, right: 80 }, maxZoom: 14, duration: prefersReducedMotion() ? 0 : 700 },
+    );
+    setRouteQuery("");
+  }
+
+  const routeBuses = selectedRoute
+    ? markers.filter((m) => m.kind === "bus-probe" && m.gtfsRouteId === selectedRoute.gtfsRouteId)
+    : [];
+
   function toggleKind(kind: MapMarkerKind) {
     setHiddenKinds((prev) => {
       const next = new Set(prev);
@@ -915,6 +1280,15 @@ export function GISMap({
           </button>
           {panelOpen && (
             <div className="border-t border-line px-2 py-1.5 flex flex-col max-h-[60vh] overflow-y-auto">
+              {routeSearch && routeLines.length > 0 && (
+                <RouteSearch
+                  query={routeQuery}
+                  onQuery={setRouteQuery}
+                  results={searchResults}
+                  loading={Boolean(routeQuery) && !routeIndex}
+                  onPick={pickRoute}
+                />
+              )}
               {(heatmap || rasterOverlay) && (
                 <LayerToggle
                   checked={showHeat}
@@ -941,21 +1315,27 @@ export function GISMap({
                   />
                 );
               })}
-              {routeLines.length > 0 && (
+              {agencyRouteCounts.map(({ agencyId, routes }) => (
                 <LayerToggle
-                  checked={showRoutes}
-                  onChange={() => setShowRoutes((v) => !v)}
-                  label="BEST routes"
-                  swatch={<span className="block h-[3px] w-4 rounded-full bg-network" />}
+                  key={agencyId}
+                  checked={!hidden.has(agencyId)}
+                  onChange={() => toggleAgency(agencyId)}
+                  label={`${agencyId} routes`}
+                  count={routes}
+                  swatch={<span className="block h-[3px] w-4 rounded-full" style={{ background: AGENCY_ROUTE_COLORS[agencyId] ?? NETWORK_COLOR }} />}
                 />
-              )}
+              ))}
               {stops.length > 0 && (
                 <LayerToggle
                   checked={showStops}
                   onChange={() => setShowStops((v) => !v)}
-                  label="BEST stops"
+                  label="Transit stops"
+                  count={stops.length}
                   swatch={<span className="block h-2.5 w-2.5 rounded-full border-2 border-network bg-surface" />}
                 />
+              )}
+              {routeLines.length > 0 && (
+                <p className="px-1 pt-1 text-micro font-medium text-ink-3">GTFS network · scheduled, not live</p>
               )}
               {legend && <div className="border-t border-line mt-1.5 pt-2 px-1 pb-1">{legend}</div>}
             </div>
@@ -994,6 +1374,22 @@ export function GISMap({
       </div>
 
       {(callouts ?? []).map((c) => createPortal(c.content, calloutElFor(c.key, c.side ?? "right"), c.key))}
+
+      {selectedRoute &&
+        createPortal(
+          <RouteCallout
+            route={selectedRoute}
+            summary={routeIndex?.find((r) => r.gtfsRouteId === selectedRoute.gtfsRouteId)}
+            indexLoaded={Boolean(routeIndex)}
+            sensingBuses={{
+              simulated: routeBuses.filter((b) => b.positionSource !== "DEMO").length,
+              demo: routeBuses.filter((b) => b.positionSource === "DEMO").length,
+            }}
+            onClose={() => openRouteRef.current(null)}
+          />,
+          routePopupEl,
+        )}
+      {markerPopupContent && createPortal(markerPopupContent, markerPopupEl)}
 
       {overlay}
     </div>

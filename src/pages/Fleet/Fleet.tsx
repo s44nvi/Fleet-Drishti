@@ -1,11 +1,12 @@
 import { useMemo, useState } from "react";
 import { Bus as BusIcon, Gauge, ScanEye, Video } from "lucide-react";
 import { ButtonLink, EmptyState, IconTile, PageHeader, Panel, SourceBadge, StatusBadge } from "../../components/ui";
-import { GISMap, MapDrawer } from "../../components/gis";
+import { GISMap, MapDrawer, SensingBusCard } from "../../components/gis";
 import { DetectionPlayer } from "../../components/ai";
 import { useAsyncData } from "../../hooks/useAsyncData";
 import { eventService, fleetService, mediaService, routeService } from "../../services";
-import { busMarker } from "../../lib/mapMarkers";
+import { busMarker, demoBusMarker } from "../../lib/mapMarkers";
+import { demoBusView } from "../../lib/sensingBus";
 import { BUS_STATUS, CAMERA_STATUS } from "../../lib/status";
 import { TONE_CLASSES } from "../../lib/visuals";
 import { datasetAnchor } from "../../lib/pulse";
@@ -31,6 +32,9 @@ export function Fleet() {
   const { data: routes } = useAsyncData(() => routeService.listRoutes(), []);
   const { data: clips } = useAsyncData(() => mediaService.listDetectionClips(), []);
   const { data: networkRouteLines } = useAsyncData(() => routeService.listNetworkRouteLines(), []);
+  const { data: networkStops } = useAsyncData(() => routeService.listNetworkStops(), []);
+  // DEMO density layer — map only; the roster stays the fixture fleet.
+  const { data: demoBuses } = useAsyncData(() => fleetService.listDemoSensingBuses(), []);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
@@ -51,7 +55,12 @@ export function Fleet() {
   const selectedCameras = allCameras.filter((c) => c.busId === selectedId);
   const selectedClips = (clips ?? []).filter((c) => c.busId === selectedId);
   const selectedShortName = selected ? selected.routeId.replace("BEST-", "") : null;
-  const selectedRouteHasGeometry = Boolean(selectedShortName && networkRouteLines?.some((l) => l.shortName === selectedShortName));
+  const selectedDemo = demoBuses?.find((b) => b.busId === selectedId);
+  const selectedRouteHasGeometry = Boolean(
+    selectedDemo ||
+      (selectedShortName && networkRouteLines?.some((l) => l.agencyId === "BEST" && l.shortName === selectedShortName)),
+  );
+  const mapMarkers = useMemo(() => [...(demoBuses ?? []).map(demoBusMarker), ...allBuses.map(busMarker)], [demoBuses, allBuses]);
 
   function select(id: string | null) {
     setSelectedId(id);
@@ -62,6 +71,8 @@ export function Fleet() {
     <>
       <PageHeader
         title="Fleet"
+        subtitle="Monitor connected buses, routes, sensing status, and fleet coverage."
+        banner
         context={
           <>
             <span className="tabular-nums">
@@ -90,7 +101,7 @@ export function Fleet() {
         </Panel>
       )}
 
-      <section className="grid grid-cols-1 xl:grid-cols-12 gap-4 xl:h-[calc(100dvh-15rem)] xl:min-h-[540px]">
+      <section className="grid grid-cols-1 xl:grid-cols-12 gap-4 xl:h-[calc(100dvh-21rem)] xl:min-h-[540px]">
         <Panel as="section" className="xl:col-span-5 flex flex-col min-h-0" aria-label="Bus roster">
           {loading ? (
             <p className="p-6 text-body text-ink-3">Loading fleet…</p>
@@ -155,9 +166,11 @@ export function Fleet() {
         <GISMap
           className="xl:col-span-7 h-[480px] xl:h-full"
           ariaLabel="Fleet positions and routes"
-          markers={allBuses.map(busMarker)}
+          markers={mapMarkers}
           routeLines={networkRouteLines ?? []}
+          stops={networkStops ?? []}
           highlightRoute={selectedShortName}
+          highlightRouteId={selectedDemo?.gtfsRouteId ?? null}
           flyToSelection={!selectedRouteHasGeometry}
           selectedId={selectedId}
           drawerOpen={Boolean(selectedId)}
@@ -165,7 +178,22 @@ export function Fleet() {
           onSelect={select}
           fitToMarkers
           overlay={
-            selected && (
+            selectedDemo ? (
+              <MapDrawer
+                title={
+                  <span className="flex items-center gap-2">
+                    {selectedDemo.busId}
+                    <StatusBadge tone={selectedDemo.status === "active" ? "ok" : "watch"}>
+                      {selectedDemo.status === "active" ? "Online" : "Idle"}
+                    </StatusBadge>
+                  </span>
+                }
+                onClose={() => setSelectedId(null)}
+              >
+                <SensingBusCard bus={demoBusView(selectedDemo)} />
+              </MapDrawer>
+            ) : (
+              selected && (
               <MapDrawer
                 title={
                   <span className="flex items-center gap-2">
@@ -206,6 +234,7 @@ export function Fleet() {
                   </ButtonLink>
                 </div>
               </MapDrawer>
+              )
             )
           }
         />

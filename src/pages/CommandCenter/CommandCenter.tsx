@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { AlertOctagon, Bus, FileWarning, MapPin, ScanEye } from "lucide-react";
 import { PageHeader, Panel, SourceBadge } from "../../components/ui";
 import { KpiStrip, CityPulse } from "../../components/telemetry";
-import { GISMap } from "../../components/gis";
+import { BusCallout, GISMap } from "../../components/gis";
 import { LiveEventList, TopLocations } from "../../components/events";
 import { DetectionPlayer } from "../../components/ai";
 import { useAsyncData } from "../../hooks/useAsyncData";
@@ -10,8 +10,10 @@ import { analyticsService, eventService, fleetService, issueService, mediaServic
 import { groupEventsIntoIntelligence } from "../../lib/intelligenceGrouping";
 import { isInfrastructureAssetInScope, isRoadDomainType } from "../../lib/taxonomy";
 import { computeCityPulse, datasetAnchor } from "../../lib/pulse";
+import { demoBusView, fixtureBusView } from "../../lib/sensingBus";
 import {
   busMarker,
+  demoBusMarker,
   infrastructureMarker,
   issueMarker,
   nearestMarker,
@@ -52,6 +54,9 @@ export function CommandCenter() {
   const { data: routes } = useAsyncData(() => routeService.listRoutes(), []);
   const { data: networkStops } = useAsyncData(() => routeService.listNetworkStops(), []);
   const { data: networkRouteLines } = useAsyncData(() => routeService.listNetworkRouteLines(), []);
+  // DEMO density layer on the GTFS network — map only, never in KPIs.
+  const { data: demoBuses } = useAsyncData(() => fleetService.listDemoSensingBuses(), []);
+  const { data: detections } = useAsyncData(() => eventService.listDetections(), []);
 
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null);
@@ -90,9 +95,10 @@ export function CommandCenter() {
       ...(safetyEvents ?? []).map((e) => safetyMarker(e, anchor)),
       ...roadGroups.map((g) => observationGroupMarker(g, anchor)),
       ...roadIssues.map((i) => issueMarker(i, anchor)),
+      ...(demoBuses ?? []).map(demoBusMarker),
       ...(buses ?? []).map(busMarker),
     ];
-  }, [allIssues, allEvents, infrastructureIssues, trafficHotspots, safetyEvents, buses, anchor]);
+  }, [allIssues, allEvents, infrastructureIssues, trafficHotspots, safetyEvents, buses, demoBuses, anchor]);
 
   const observationMarkers = useMemo(() => markers.filter((m) => m.kind !== "bus-probe"), [markers]);
   const pulse = useMemo(() => (events && safetyEvents ? computeCityPulse(allEvents, safetyEvents, anchor) : undefined), [
@@ -106,6 +112,20 @@ export function CommandCenter() {
     [routes],
   );
   const kpiTiles = (kpis ?? []).map((tile) => ({ ...tile, ...KPI_VISUALS[tile.id] }));
+
+  // Selected bus → a compact callout pinned to it: the sensing bus, the GTFS
+  // route it runs, its terminals, and its camera / AI state.
+  function busPopup(marker: MapMarker, close: () => void) {
+    if (marker.kind !== "bus-probe") return null;
+    const fixture = buses?.find((b) => b.busId === marker.id);
+    if (fixture) {
+      const route = routes?.find((r) => r.routeId === fixture.routeId);
+      return <BusCallout bus={fixtureBusView(fixture, cameras ?? [], allEvents, detections ?? [], route)} onClose={close} />;
+    }
+    const demo = demoBuses?.find((b) => b.busId === marker.id);
+    return demo ? <BusCallout bus={demoBusView(demo)} onClose={close} /> : null;
+  }
+  const selectedBusRouteId = markers.find((m) => m.id === selectedMarkerId && m.kind === "bus-probe")?.gtfsRouteId ?? null;
 
   function markerForEvent(event: Event): MapMarker | undefined {
     const issue = allIssues.find((i) => i.relatedEventIds.includes(event.eventId));
@@ -162,6 +182,8 @@ export function CommandCenter() {
     <>
       <PageHeader
         title="Command Center"
+        subtitle="Real-time view of fleet activity, urban observations, and priority events."
+        banner
         context={
           <>
             <span className="inline-flex items-center gap-1">
@@ -184,6 +206,9 @@ export function CommandCenter() {
           markers={markers}
           stops={networkStops ?? []}
           routeLines={networkRouteLines ?? []}
+          markerPopup={busPopup}
+          highlightRouteId={selectedBusRouteId}
+          fitHighlightedRoute={false}
           selectedId={selectedMarkerId}
           hoveredId={hoveredMarkerId}
           onSelect={selectMarker}
