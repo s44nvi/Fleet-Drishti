@@ -4,6 +4,8 @@ import { Link, useNavigate } from "react-router-dom";
 import * as maplibregl from "maplibre-gl";
 import type { GeoJSONSource, Map as MapLibreMap, MapLayerMouseEvent, Marker as MapLibreMarker } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+import { ErrorBoundary } from "../ErrorBoundary";
+import { isWebGL2Supported } from "../../lib/webgl";
 import {
   Bus,
   Building2,
@@ -471,7 +473,11 @@ function LayerToggle({
 // effects. Back to front: basemap → optional heatmap → BEST route network →
 // BEST stops → Fleet Drishti intelligence markers (DOM markers, rendered as
 // React portals so they share the design system's icons and tokens).
-export function GISMap({
+//
+// Not exported directly — see GISMap below, which gates this behind a
+// WebGL2 check and an error boundary so a map failure can never take down
+// the rest of the app.
+function GISMapCanvas({
   markers,
   stops = [],
   routeLines = [],
@@ -1393,5 +1399,40 @@ export function GISMap({
 
       {overlay}
     </div>
+  );
+}
+
+// Same wrapper markup GISMapCanvas uses, so the fallback occupies exactly
+// the space the real map would (no layout shift for callers that size it
+// via `className`, e.g. h-[480px] / xl:h-full).
+function MapUnavailable({ className, message }: { className?: string; message: string }) {
+  return (
+    <div className={cn("relative h-full w-full overflow-hidden rounded-xl border border-line bg-surface-2", className)}>
+      <div className="absolute inset-0 flex items-center justify-center p-6 text-center">
+        <p className="text-body text-ink-3 max-w-[32ch]">{message}</p>
+      </div>
+    </div>
+  );
+}
+
+// Public entry point. A map failure — WebGL2 unavailable, a MapLibre
+// internal error, a bad response, malformed GeoJSON, anything — must never
+// take down the rest of the app (sidebar, nav, every other page). Two
+// layers of defense:
+//   1. A proactive WebGL2 check, so the common case (WebGL disabled/
+//      unsupported) never even attempts MapLibre's init code.
+//   2. An error boundary around the real map, so any other unexpected
+//      failure is contained to this component instead of unmounting React.
+export function GISMap(props: GISMapProps) {
+  if (!isWebGL2Supported()) {
+    return <MapUnavailable className={props.className} message="Map unavailable — your browser doesn't support WebGL2." />;
+  }
+
+  return (
+    <ErrorBoundary
+      fallback={<MapUnavailable className={props.className} message="Map unavailable — something went wrong loading it." />}
+    >
+      <GISMapCanvas {...props} />
+    </ErrorBoundary>
   );
 }
