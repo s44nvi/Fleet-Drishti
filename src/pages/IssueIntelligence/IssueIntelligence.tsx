@@ -45,6 +45,10 @@ export function IssueIntelligence() {
   const chronological = [...(relatedEvents ?? [])].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
   const routeNames = Object.fromEntries((routes ?? []).map((r) => [r.routeId, `${r.origin} → ${r.destination}`]));
   const corroborated = (issue?.observingBuses.length ?? 0) > 1;
+  // With no bus list (real backend Issues) fall back to the backend's
+  // observationCount rather than implying a single sighting; never state a
+  // bus count that is not known.
+  const observationsOnly = !!issue && issue.observingBuses.length === 0 && issue.observationCount > 1;
 
   return (
     <>
@@ -69,7 +73,11 @@ export function IssueIntelligence() {
               <SeverityBadge severity={issue.severity} />
               <StatusBadge tone={issueStatusMeta(issue.status).tone}>{issueStatusMeta(issue.status).label}</StatusBadge>
               <StatusBadge tone={corroborated ? "ok" : "neutral"} icon={corroborated ? ShieldCheck : undefined}>
-                {corroborated ? `Corroborated by ${issue.observingBuses.length} buses` : "Single observation"}
+                {corroborated
+                  ? `Corroborated by ${issue.observingBuses.length} buses`
+                  : observationsOnly
+                    ? `${issue.observationCount} observations`
+                    : "Single observation"}
               </StatusBadge>
             </>
           )
@@ -136,7 +144,11 @@ export function IssueIntelligence() {
                     <span className="mt-3 h-3 w-3 rounded-full bg-ok ring-4 ring-ok-soft" />
                   </span>
                   <p className="py-2 text-item text-ok-ink">
-                    {corroborated ? `Fused into one issue from ${issue.observingBuses.length} buses` : "Single sighting · awaiting a second bus"}
+                    {corroborated
+                      ? `Fused into one issue from ${issue.observingBuses.length} buses`
+                      : observationsOnly
+                        ? `Fused into one issue from ${issue.observationCount} observations`
+                        : "Single sighting · awaiting a second bus"}
                   </p>
                 </li>
               </ol>
