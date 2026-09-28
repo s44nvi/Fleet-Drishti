@@ -66,12 +66,20 @@ def run_model(
     model,
     frame,
     confidence_threshold: float = 0.25,
+    imgsz: int = 0,
 ) -> list[RawBox]:
-    """Run the model on one frame and return its boxes in a plain form."""
+    """
+    Run the model on one frame and return its boxes in a plain form.
+
+    imgsz=0 keeps the ultralytics default inference size.
+    """
+    options = {"imgsz": imgsz} if imgsz else {}
+
     results = model.predict(
         frame,
         conf=confidence_threshold,
         verbose=False,
+        **options,
     )
 
     boxes = []

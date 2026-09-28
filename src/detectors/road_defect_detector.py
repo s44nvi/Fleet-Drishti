@@ -17,6 +17,8 @@ stays the default so the pipeline keeps running.
 from config import (
     DETECTOR_MODE,
     ROAD_DEFECT_CONFIDENCE,
+    ROAD_DEFECT_IMGSZ,
+    ROAD_DEFECT_MIN_CENTER_Y,
     ROAD_DEFECT_MODEL_PATH,
 )
 from detectors.base import Detection, Detector
@@ -89,10 +91,14 @@ class YoloRoadDefectDetector(Detector):
         weights_path: str = ROAD_DEFECT_MODEL_PATH,
         confidence_threshold: float = ROAD_DEFECT_CONFIDENCE,
         model=None,
+        imgsz: int = ROAD_DEFECT_IMGSZ,
+        min_center_y: float = ROAD_DEFECT_MIN_CENTER_Y,
     ):
         self.weights_path = weights_path
         self.confidence_threshold = confidence_threshold
         self.model = model
+        self.imgsz = imgsz
+        self.min_center_y = min_center_y
 
     def _ensure_model(self):
         # Loaded on first use: constructing the detector must not require
@@ -107,6 +113,7 @@ class YoloRoadDefectDetector(Detector):
             self._ensure_model(),
             frame,
             self.confidence_threshold,
+            self.imgsz,
         )
 
         detections = []
@@ -116,6 +123,12 @@ class YoloRoadDefectDetector(Detector):
 
             if class_name is None:
                 continue
+
+            if self.min_center_y > 0:
+                centre_y = (box.bbox[1] + box.bbox[3]) / 2
+
+                if centre_y < frame.shape[0] * self.min_center_y:
+                    continue
 
             detections.append(
                 Detection(

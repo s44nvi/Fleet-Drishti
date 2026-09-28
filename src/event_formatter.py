@@ -11,6 +11,7 @@ from pedestrian_safety import HazardSignal
 ROAD_DEFECT = "road_defect"
 TRAFFIC_DENSITY = "traffic_density"
 PEDESTRIAN_HAZARD = "pedestrian_hazard"
+SAFETY_VIOLATION = "safety_violation"
 
 
 def build_event(
@@ -89,6 +90,21 @@ def hazard_to_event(
         event_type=PEDESTRIAN_HAZARD,
         subtype=signal.subtype,
         confidence=signal.confidence,
+        gps=gps,
+        timestamp=timestamp,
+    )
+
+
+def helmet_to_event(
+    detection: Detection,
+    gps: GPSPoint,
+    timestamp: datetime | None = None,
+) -> dict:
+    """A rider without a helmet: safety_violation / no_helmet."""
+    return build_event(
+        event_type=SAFETY_VIOLATION,
+        subtype=detection.class_name,
+        confidence=detection.confidence,
         gps=gps,
         timestamp=timestamp,
     )

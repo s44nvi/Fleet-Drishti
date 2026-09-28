@@ -47,6 +47,18 @@ ROAD_DEFECT_CONFIDENCE = float(
     os.getenv("ROAD_DEFECT_CONFIDENCE", "0.35")
 )
 
+# Optional inference size (pixels) for the road-defect model. 0 keeps the
+# ultralytics default. Small potholes are often only found at a larger size.
+ROAD_DEFECT_IMGSZ = int(os.getenv("ROAD_DEFECT_IMGSZ", "0"))
+
+# Optional road-region filter: a road defect whose box centre is above this
+# fraction of the frame height (0 = top, 1 = bottom) is dropped, since it
+# cannot be on the road surface (e.g. sky / tree canopy false positives).
+# 0.0 disables the filter.
+ROAD_DEFECT_MIN_CENTER_Y = float(
+    os.getenv("ROAD_DEFECT_MIN_CENTER_Y", "0.0")
+)
+
 # Vehicle / density model
 VEHICLE_MODEL_PATH = os.getenv("VEHICLE_MODEL_PATH", "yolov8n.pt")
 VEHICLE_CONFIDENCE = float(os.getenv("VEHICLE_CONFIDENCE", "0.40"))
@@ -83,6 +95,27 @@ HAZARD_GROUP_SIZE = int(os.getenv("HAZARD_GROUP_SIZE", "3"))
 HAZARD_MIN_GAP_SECONDS = float(
     os.getenv("HAZARD_MIN_GAP_SECONDS", "5.0")
 )
+
+# Helmet detection (opt-in)
+# Reports "Without Helmet" as safety_violation / no_helmet. Off by default.
+HELMET_DETECTION_ENABLED = (
+    os.getenv("HELMET_DETECTION_ENABLED", "false").lower() == "true"
+)
+HELMET_MODEL_PATH = os.getenv("HELMET_MODEL_PATH", "helmet.pt")
+HELMET_CONFIDENCE = float(os.getenv("HELMET_CONFIDENCE", "0.40"))
+
+# Demo / recording options (all opt-in, defaults leave behaviour unchanged)
+# Video the runner reads.
+VIDEO_PATH = os.getenv("VIDEO_PATH", "sample.mp4")
+
+# JSON file of {"t": seconds, "lat": .., "lng": ..} points. When set, the
+# GPS position follows this track instead of a fixed point.
+GPS_TRACK_FILE = os.getenv("GPS_TRACK_FILE", "")
+
+# When set, an annotated H.264 MP4 is written to this path.
+ANNOTATED_VIDEO_PATH = os.getenv("ANNOTATED_VIDEO_PATH", "")
+ANNOTATED_VIDEO_LABEL = os.getenv("ANNOTATED_VIDEO_LABEL", "")
+ANNOTATED_GPS_LABEL = os.getenv("ANNOTATED_GPS_LABEL", "GPS: SIMULATED")
 
 # Vehicle tracking (incidents)
 TRACKER_IOU_THRESHOLD = float(
