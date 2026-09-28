@@ -1,25 +1,33 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 
+from config import (
+    ANNOTATED_GPS_LABEL,
+    ANNOTATED_VIDEO_LABEL,
+    ANNOTATED_VIDEO_PATH,
+    BUS_ID,
+    HELMET_DETECTION_ENABLED,
+    VIDEO_PATH,
+)
 from video_reader import read_video
+from annotate import AnnotatedVideoWriter
 from density import DensityMonitor
+from detectors.helmet_detector import NO_HELMET, build_helmet_detector
 from detectors.pedestrian_detector import build_pedestrian_detector
 from detectors.road_defect_detector import build_road_defect_detector
 from detectors.vehicle_detector import build_vehicle_detector
-from gps_provider import SimulatedGPS
+from gps_provider import build_gps_provider
 from event_formatter import (
     density_to_event,
     detection_to_event,
     hazard_to_event,
+    helmet_to_event,
 )
 from backend_client import send_event, send_evidence
 from dedup import Deduplicator
 from motion_gate import MotionGate
 from pedestrian_safety import PedestrianHazardMonitor
 from evidence import save_detection_frame
-
-
-VIDEO_PATH = "sample.mp4"
 
 
 @dataclass
@@ -96,7 +104,26 @@ def main():
     vehicle_detector = build_vehicle_detector()
     pedestrian_detector = build_pedestrian_detector()
 
-    gps_provider = SimulatedGPS()
+    helmet_detector = (
+        build_helmet_detector() if HELMET_DETECTION_ENABLED else None
+    )
+    helmet_deduplicator = Deduplicator(
+        max_distance=100.0,
+        max_gap_seconds=1.0,
+    )
+
+    annotator = (
+        AnnotatedVideoWriter(
+            VIDEO_PATH,
+            ANNOTATED_VIDEO_PATH,
+            bus_label=ANNOTATED_VIDEO_LABEL or BUS_ID,
+            gps_label=ANNOTATED_GPS_LABEL,
+        )
+        if ANNOTATED_VIDEO_PATH
+        else None
+    )
+
+    gps_provider = build_gps_provider()
 
     deduplicator = Deduplicator(
         max_distance=100.0,
@@ -134,8 +161,11 @@ def main():
             + timedelta(seconds=timestamp_seconds)
         )
 
+        frame_detections = []
+
         # Road defects
         detections = road_defect_detector.detect(frame)
+        frame_detections.extend(detections)
         stats.detections_seen += len(detections)
 
         for detection in detections:
@@ -164,6 +194,7 @@ def main():
 
         # Traffic density
         vehicles = vehicle_detector.detect(frame)
+        frame_detections.extend(vehicles)
         stats.detections_seen += len(vehicles)
 
         density_signal = density_monitor.update(
@@ -190,6 +221,7 @@ def main():
 
         # Pedestrian safety
         pedestrians = pedestrian_detector.detect(frame)
+        frame_detections.extend(pedestrians)
         stats.detections_seen += len(pedestrians)
 
         hazard_signal = hazard_monitor.update(
@@ -213,6 +245,44 @@ def main():
                 ),
                 stats=stats,
             )
+
+        # Helmets (opt-in): only "Without Helmet" becomes an event
+        if helmet_detector is not None:
+            riders = helmet_detector.detect(frame)
+            frame_detections.extend(riders)
+            stats.detections_seen += len(riders)
+
+            for rider in riders:
+                if rider.class_name != NO_HELMET:
+                    continue
+
+                if not helmet_deduplicator.should_emit(
+                    rider,
+                    timestamp_seconds,
+                ):
+                    continue
+
+                emit_event(
+                    event=helmet_to_event(
+                        detection=rider,
+                        gps=gps,
+                        timestamp=event_timestamp,
+                    ),
+                    frame=frame,
+                    frame_number=frame_number,
+                    label=f"safety_violation/{rider.class_name}",
+                    stats=stats,
+                )
+
+        if annotator is not None:
+            annotator.record(
+                frame_number,
+                frame_detections,
+                stats.events_sent,
+            )
+
+    if annotator is not None:
+        print(f"Annotated video: {annotator.finish()}")
 
     skipped_percent = (
         100.0 * stats.frames_skipped / stats.frames_sampled
