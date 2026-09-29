@@ -82,4 +82,14 @@ export const recordedClips: DetectionClip[] = [
     media: { kind: "video", url: "/media/clips/img7758-bus058.mp4" },
     frames: [],
   },
+  {
+    clipId: "WA_1447-BUS-090",
+    source: "recorded",
+    busId: "BUS-090",
+    cameraId: "CAM-090-FRONT",
+    capturedAt: "2026-09-12T14:47:21+05:30",
+    location: "capture time approximate, location unknown · GPS SIMULATED, sample footage",
+    media: { kind: "video", url: "/media/clips/wa1447-bus090.mp4" },
+    frames: [],
+  },
 ];
