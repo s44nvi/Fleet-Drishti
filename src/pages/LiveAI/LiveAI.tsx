@@ -16,7 +16,13 @@ function clock(timestamp: string) {
 // throughput/latency/model-health figures are shown — none exist in the data.
 export function LiveAI() {
   const { data: detections, loading } = useAsyncData(() => eventService.listDetections(), []);
-  const { data: clips } = useAsyncData(() => mediaService.listDetectionClips(), []);
+  const { data: allClips } = useAsyncData(() => mediaService.listDetectionClips(), []);
+  // Only clips with real media are steppable here — a demo entry (media
+  // {kind:"none"}) has no footage to play, so it is never counted or shown
+  // in this page's strip. The underlying detection records (the list on
+  // the right, and its counts) are untouched: they still include every
+  // detection, demo or not.
+  const clips = (allClips ?? []).filter((clip) => clip.media.kind !== "none");
   const { data: cameras } = useAsyncData(() => fleetService.listCameras(), []);
   const { data: routes } = useAsyncData(() => routeService.listRoutes(), []);
   const [activeClipId, setActiveClipId] = useState<string | null>(null);
@@ -24,7 +30,7 @@ export function LiveAI() {
   const sorted = [...(detections ?? [])].sort((a, b) => new Date(b.frameTimestamp).getTime() - new Date(a.frameTimestamp).getTime());
   const promoted = sorted.filter((d) => d.eventId).length;
   const routeNames = Object.fromEntries((routes ?? []).map((r) => [r.routeId, `${r.origin} → ${r.destination}`]));
-  const activeClip = (clips ?? []).find((c) => c.clipId === activeClipId) ?? clips?.[0];
+  const activeClip = clips.find((c) => c.clipId === activeClipId) ?? clips?.[0];
 
   return (
     <>
@@ -43,7 +49,7 @@ export function LiveAI() {
       <section className="grid grid-cols-1 xl:grid-cols-12 gap-4 items-start">
         <Panel as="section" className="xl:col-span-7 p-4" aria-label="Detection player">
           <DetectionPlayer
-            clips={clips ?? []}
+            clips={clips}
             activeClipId={activeClipId}
             onActiveChange={setActiveClipId}
             routeNames={routeNames}
@@ -59,7 +65,7 @@ export function LiveAI() {
             <ul className="px-2 pb-2">
               {sorted.map((d) => {
                 const visual = categoryVisual(d.objectClass);
-                const clip = (clips ?? []).find((c) => c.eventId && c.eventId === d.eventId);
+                const clip = clips.find((c) => c.eventId && c.eventId === d.eventId);
                 const selected = clip && clip.clipId === activeClip?.clipId;
                 const body = (
                   <>
