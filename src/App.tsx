@@ -1,5 +1,7 @@
-import { Routes, Route } from "react-router-dom";
+import { useState } from "react";
+import { Routes, Route, useSearchParams } from "react-router-dom";
 import { AppShell } from "./components/layout";
+import { AboutSplash } from "./components/intro/AboutSplash";
 import { Login } from "./pages/Login";
 import { RequireAuth } from "./lib/auth/RequireAuth";
 import { CommandCenter } from "./pages/CommandCenter";
@@ -25,6 +27,15 @@ import { NotFound } from "./pages/NotFound";
 // priority-queue, live-ai, architecture) are reached from links on the
 // primary pages rather than the nav bar itself.
 function App() {
+  // Demo-only: ?intro=1 shows the AboutSplash before anything else,
+  // including the RequireAuth/login check below. Off by default; never
+  // triggered by a normal visit or by the auth flow itself.
+  const [searchParams] = useSearchParams();
+  const [showIntro, setShowIntro] = useState(searchParams.get("intro") === "1");
+  if (showIntro) {
+    return <AboutSplash onDismiss={() => setShowIntro(false)} />;
+  }
+
   return (
     <Routes>
       <Route path="login" element={<Login />} />
