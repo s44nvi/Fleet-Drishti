@@ -88,7 +88,7 @@ export const recordedClips: DetectionClip[] = [
     busId: "BUS-090",
     cameraId: "CAM-090-FRONT",
     capturedAt: "2026-09-12T14:47:21+05:30",
-    location: "capture time approximate, location unknown · GPS SIMULATED, sample footage",
+    location: "Sample location (not the actual capture site) · sample footage",
     media: { kind: "video", url: "/media/clips/wa1447-bus090.mp4" },
     frames: [],
   },
